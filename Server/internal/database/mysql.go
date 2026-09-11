@@ -3,32 +3,36 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
-	"github.com/G6kco/CyberSpace.git/internal/types"
+	_ "github.com/go-sql-driver/mysql"
+
+	"github.com/G6kco/CyberSpace/internal/types"
 )
 
-func NewMySQL(dsn string) error {
-	var err error
+func NewMySQL(dsn string) (*sql.DB, error) {
+
 	if dsn == "" {
-		return types.DataBaseStrEmptyError
-	}
-	
-	types.DBCONN , err = sql.Open("mysql", dsn)
-	if err != nil{
-		return err
-	}
-	
-	types.DBCONN.SetMaxOpenConns(25)
-	types.DBCONN.SetMaxIdleConns(10)
-	types.DBCONN.SetConnMaxLifetime(5 * time.Minute)
-	types.DBCONN.SetConnMaxIdleTime(2 * time.Minute)
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
-	defer cancel()
-	if err := types.DBCONN.PingContext(ctx); err != nil{
-		return err
+		return nil, types.DataBaseStrEmptyError
 	}
 
-	return nil
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ping mysql: %w", err)
+	}
+
+	return db, nil
 }
