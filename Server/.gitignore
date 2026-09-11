@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+bin/
+*.exe
+*.test
+coverage.out
+cover.out
+*.log
+tmp/
+temp/
