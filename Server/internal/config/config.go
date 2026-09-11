@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	types "github.com/G6kco/CyberSpace.git/internal/error"
+	types "github.com/G6kco/CyberSpace.git/internal/types"
 	"github.com/caarlos0/env/v6"
 	"github.com/joho/godotenv"
 )
