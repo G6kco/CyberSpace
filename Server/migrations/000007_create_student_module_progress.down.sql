@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS student_module_progress;
