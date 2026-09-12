@@ -3,6 +3,8 @@ package types
 import (
 	"database/sql"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -11,3 +13,4 @@ var (
 )
 
 var DBCONN *sql.DB
+var LOG *zap.Logger
