@@ -12,11 +12,11 @@ type Config struct {
 	AppEnv         string `env:"ENV,required"`
 	ServerPort     uint   `env:"PORT"`
 	DatabaseURL    string `env:"DATABASE_URL,required"`
-	FrontendURL    string `env:"FRONTEND_URL,required"`
-	SessionSecret  string `env:"SESSION_SECRET,required"`
-	GoogleClientID string `env:"GOOGLE_CLIENT_ID,required"`
-	GoogleSecret   string `env:"GOOGLE_SECRET, required"`
-	GoogleCallback string `env:"GOOGLE_CALL_BACK, required"`
+	FrontendURL    string `env:"FRONTEND_URL"`
+	SessionSecret  string `env:"SESSION_SECRET"`
+	GoogleClientID string `env:"GOOGLE_CLIENT_ID"`
+	GoogleSecret   string `env:"GOOGLE_SECRET"`
+	GoogleCallback string `env:"GOOGLE_CALL_BACK"`
 	DockerHost     string `env:"DOCKER_HOST"`
 }
 
