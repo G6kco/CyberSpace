@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	types "github.com/G6kco/CyberSpace/internal/types"
 	"github.com/caarlos0/env/v6"
@@ -21,9 +23,7 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("No .env file found, using OS environment variables")
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	} else {
 		fmt.Println("Successfully loaded the env file, using defined environment variables")
