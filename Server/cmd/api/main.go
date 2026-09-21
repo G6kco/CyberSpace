@@ -77,14 +77,7 @@ func run() error {
 	types.LOG.Info("Router loaded")
 
 	// 5. Construct an explicit HTTP server.
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.ServerPort),
-		Handler:           engine,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	httpServer := newHTTPServer(cfg.ServerPort, engine)
 
 	// 6. Start the HTTP server without blocking signal handling.
 	serverErrors := make(chan error, 1)
@@ -150,4 +143,15 @@ func run() error {
 	types.LOG.Info("HTTP server stopped successfully")
 
 	return nil
+}
+
+func newHTTPServer(port uint, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }
