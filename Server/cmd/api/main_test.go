@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/G6kco/CyberSpace/internal/types"
 )
 
 func TestNewHTTPServer(t *testing.T) {
@@ -59,14 +57,6 @@ func TestRunRejectsEmptyAppEnvironment(t *testing.T) {
 func TestRunReturnsDatabaseConnectionError(t *testing.T) {
 	t.Setenv("ENV", "development")
 	t.Setenv("DATABASE_URL", "user:password@tcp(localhost:3306")
-
-	previousLogger := types.LOG
-	t.Cleanup(func() {
-		if types.LOG != nil && types.LOG != previousLogger {
-			_ = types.LOG.Sync()
-		}
-		types.LOG = previousLogger
-	})
 
 	err := run()
 

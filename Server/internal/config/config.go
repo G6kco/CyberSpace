@@ -2,7 +2,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	types "github.com/G6kco/CyberSpace/internal/types"
@@ -20,13 +19,12 @@ type Config struct {
 	GoogleSecret   string `env:"GOOGLE_SECRET"`
 	GoogleCallback string `env:"GOOGLE_CALL_BACK"`
 	DockerHost     string `env:"DOCKER_HOST"`
+	CORSOrigins    string `env:"CORS_ORIGIN_ALLOWED"`
 }
 
 func Load() (*Config, error) {
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
-	} else {
-		fmt.Println("Successfully loaded the env file, using defined environment variables")
 	}
 
 	cfg := Config{}

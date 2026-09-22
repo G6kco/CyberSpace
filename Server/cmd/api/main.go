@@ -10,12 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/G6kco/CyberSpace/internal/app"
 	"github.com/G6kco/CyberSpace/internal/config"
 	"github.com/G6kco/CyberSpace/internal/database"
 	"github.com/G6kco/CyberSpace/internal/httpapi"
-	"github.com/G6kco/CyberSpace/internal/types"
 	"github.com/G6kco/CyberSpace/logger"
-	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -38,43 +37,45 @@ func run() error {
 		return errors.New("APP_ENV cannot be empty")
 	}
 
-	logger.LoadLogger(cfg.AppEnv)
-
-	if types.LOG == nil {
-		return errors.New("logger initialization failed")
+	log, err := logger.New(cfg.AppEnv)
+	if err != nil {
+		return fmt.Errorf("initialize logger: %w", err)
 	}
 
 	defer func() {
-		_ = types.LOG.Sync()
+		_ = log.Sync()
 	}()
+
+	log.Info("Configuration loaded successfully", zap.String("environment", cfg.AppEnv))
 
 	// 3. Create the database connection.
 	db, err := database.NewMySQL(cfg.DatabaseURL)
 	if err != nil {
+		log.Error("Database connection failed", zap.Error(err))
 		return fmt.Errorf("connect to database: %w", err)
 	}
+	log.Info("Database connection pool initialized")
 
 	defer func() {
 		if err := db.Close(); err != nil {
-			types.LOG.Error(
+			log.Error(
 				"Failed to close database connection",
 				zap.Error(err),
 			)
+			return
 		}
+		log.Info("Database connection closed successfully")
 	}()
 
-	// Temporary compatibility with your existing global connection.
-	types.DBCONN = db
+	// 4. Assemble the application and inject it into the HTTP layer.
+	application, err := app.New(cfg, db, log)
+	if err != nil {
+		log.Error("Application dependency initialization failed", zap.Error(err))
+		return fmt.Errorf("initialize application: %w", err)
+	}
+	log.Info("Application dependencies initialized")
 
-	// 4. Create the Gin router.
-	engine := gin.New()
-
-	// Prevent a panic inside a handler from crashing the whole API.
-	engine.Use(gin.Recovery())
-
-	httpapi.InitRouter(engine)
-
-	types.LOG.Info("Router loaded")
+	engine := httpapi.NewRouter(application)
 
 	// 5. Construct an explicit HTTP server.
 	httpServer := newHTTPServer(cfg.ServerPort, engine)
@@ -83,7 +84,7 @@ func run() error {
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		types.LOG.Info(
+		log.Info(
 			"Starting HTTP server",
 			zap.String("environment", cfg.AppEnv),
 			zap.Uint("port", cfg.ServerPort),
@@ -106,9 +107,10 @@ func run() error {
 
 	select {
 	case <-shutdownContext.Done():
-		types.LOG.Info("Shutdown signal received")
+		log.Info("Shutdown signal received")
 
 	case err := <-serverErrors:
+		log.Error("HTTP server failed", zap.Error(err))
 		return fmt.Errorf("HTTP server failed: %w", err)
 	}
 
@@ -122,15 +124,16 @@ func run() error {
 	)
 	defer cancel()
 
-	types.LOG.Info("Shutting down HTTP server")
+	log.Info("Shutting down HTTP server")
 
 	if err := httpServer.Shutdown(timeoutContext); err != nil {
-		types.LOG.Error(
+		log.Error(
 			"Graceful shutdown failed; forcing server to close",
 			zap.Error(err),
 		)
 
 		if closeErr := httpServer.Close(); closeErr != nil {
+			log.Error("Forced HTTP server close failed", zap.Error(closeErr))
 			return fmt.Errorf(
 				"force close HTTP server: %w",
 				closeErr,
@@ -140,7 +143,7 @@ func run() error {
 		return fmt.Errorf("graceful shutdown HTTP server: %w", err)
 	}
 
-	types.LOG.Info("HTTP server stopped successfully")
+	log.Info("HTTP server stopped successfully")
 
 	return nil
 }

@@ -1,41 +1,21 @@
 package httpapi
 
 import (
-	"context"
-	"net/http"
-	"time"
-
+	"github.com/G6kco/CyberSpace/internal/app"
 	"github.com/G6kco/CyberSpace/internal/middleware"
-	"github.com/G6kco/CyberSpace/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(router *gin.Engine) {
-	router.Use(middleware.InitCORS())
+// NewRouter builds the HTTP transport with dependencies supplied explicitly.
+func NewRouter(application *app.App) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(middleware.InitCORS(application.Config.CORSOrigins))
 
-	router.GET("/health/live", func(ctx *gin.Context) {
-		ctx.JSON(http.StatusOK, gin.H{
-			"status": "alive",
-		})
-	})
+	health := newHealthHandler(application.DB, application.Logger)
+	router.GET("/health/live", health.live)
+	router.GET("/health/ready", health.ready)
 
-	router.GET("/health/ready", func(ctx *gin.Context) {
-		pingContext, cancel := context.WithTimeout(
-			ctx.Request.Context(),
-			2*time.Second,
-		)
-		defer cancel()
-
-		if err := types.DBCONN.PingContext(pingContext); err != nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "not_ready",
-				"error":  "database unavailable",
-			})
-			return
-		}
-
-		ctx.JSON(http.StatusOK, gin.H{
-			"status": "ready",
-		})
-	})
+	application.Logger.Info("Router initialized")
+	return router
 }

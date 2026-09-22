@@ -3,30 +3,32 @@ package logger
 import (
 	"strings"
 
-	"github.com/G6kco/CyberSpace/internal/types"
 	"go.uber.org/zap"
 )
 
-func LoadLogger(env string) {
-	var err error
-	var Log *zap.Logger
-
+// New constructs a logger for the requested application environment.
+func New(env string) (*zap.Logger, error) {
 	normalized := strings.ToLower(strings.TrimSpace(env))
+
+	var (
+		log *zap.Logger
+		err error
+	)
 
 	switch normalized {
 	case "development":
-		Log, err = zap.NewDevelopment()
+		log, err = zap.NewDevelopment()
 	case "production":
-		Log, err = zap.NewProduction()
+		log, err = zap.NewProduction()
 	default:
-		Log, err = zap.NewDevelopment()
+		log, err = zap.NewDevelopment()
 		normalized = "development"
 	}
-	
-	if err != nil{
-		panic("Failed to load logger : " + err.Error())
+
+	if err != nil {
+		return nil, err
 	}
-	
-	types.LOG = Log
-	Log.Info("Logger Initialized", zap.String("Environment", normalized))
+
+	log.Info("Logger initialized", zap.String("environment", normalized))
+	return log, nil
 }
