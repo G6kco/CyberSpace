@@ -3,6 +3,8 @@
 .idea/
 .DS_Store
 Thumbs.db
+AGENTS.md
+.project-memory/
 
 # Environment and local secrets
 .env
