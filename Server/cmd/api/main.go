@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,10 +35,6 @@ func run() error {
 	}
 
 	// 2. Initialize the logger before starting other dependencies.
-	if cfg.AppEnv == "" {
-		return errors.New("APP_ENV cannot be empty")
-	}
-
 	log, err := logger.New(cfg.AppEnv)
 	if err != nil {
 		return fmt.Errorf("initialize logger: %w", err)
@@ -78,7 +76,7 @@ func run() error {
 	engine := httpapi.NewRouter(application)
 
 	// 5. Construct an explicit HTTP server.
-	httpServer := newHTTPServer(cfg.ServerPort, engine)
+	httpServer := newHTTPServer(cfg.ServerHost, cfg.ServerPort, engine)
 
 	// 6. Start the HTTP server without blocking signal handling.
 	serverErrors := make(chan error, 1)
@@ -87,6 +85,7 @@ func run() error {
 		log.Info(
 			"Starting HTTP server",
 			zap.String("environment", cfg.AppEnv),
+			zap.String("host", cfg.ServerHost),
 			zap.Uint("port", cfg.ServerPort),
 		)
 
@@ -148,9 +147,9 @@ func run() error {
 	return nil
 }
 
-func newHTTPServer(port uint, handler http.Handler) *http.Server {
+func newHTTPServer(host string, port uint, handler http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10)),
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

@@ -13,10 +13,10 @@ func TestNewHTTPServer(t *testing.T) {
 		response.WriteHeader(http.StatusNoContent)
 	})
 
-	server := newHTTPServer(8080, handler)
+	server := newHTTPServer("127.0.0.1", 8080, handler)
 
-	if server.Addr != ":8080" {
-		t.Fatalf("Addr = %q, want %q", server.Addr, ":8080")
+	if server.Addr != "127.0.0.1:8080" {
+		t.Fatalf("Addr = %q, want %q", server.Addr, "127.0.0.1:8080")
 	}
 	if server.Handler == nil {
 		t.Fatal("Handler is nil")
@@ -40,22 +40,22 @@ func TestNewHTTPServer(t *testing.T) {
 	}
 }
 
-func TestRunRejectsEmptyAppEnvironment(t *testing.T) {
-	t.Setenv("ENV", "")
+func TestRunRejectsMissingDatabaseURL(t *testing.T) {
+	t.Setenv("APP_ENV", "")
 	t.Setenv("DATABASE_URL", "")
 
 	err := run()
 
 	if err == nil {
-		t.Fatal("run() error = nil, want an APP_ENV validation error")
+		t.Fatal("run() error = nil, want a DATABASE_URL validation error")
 	}
-	if err.Error() != "APP_ENV cannot be empty" {
-		t.Fatalf("run() error = %q, want %q", err, "APP_ENV cannot be empty")
+	if err.Error() != "load configuration: DATABASE_URL is required" {
+		t.Fatalf("run() error = %q, want %q", err, "load configuration: DATABASE_URL is required")
 	}
 }
 
 func TestRunReturnsDatabaseConnectionError(t *testing.T) {
-	t.Setenv("ENV", "development")
+	t.Setenv("APP_ENV", "development")
 	t.Setenv("DATABASE_URL", "user:password@tcp(localhost:3306")
 
 	err := run()

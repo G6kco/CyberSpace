@@ -3,7 +3,6 @@ module github.com/G6kco/CyberSpace
 go 1.26.4
 
 require (
-	github.com/caarlos0/env/v6 v6.10.1
 	github.com/gin-contrib/cors v1.7.8
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-sql-driver/mysql v1.10.1

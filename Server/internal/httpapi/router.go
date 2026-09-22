@@ -10,7 +10,7 @@ import (
 func NewRouter(application *app.App) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(middleware.InitCORS(application.Config.CORSOrigins))
+	router.Use(middleware.InitCORS(application.Config.AllowedOrigins))
 
 	health := newHealthHandler(application.DB, application.Logger)
 	router.GET("/health/live", health.live)
