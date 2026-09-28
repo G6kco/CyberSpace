@@ -13,23 +13,25 @@ import (
 )
 
 const (
-	defaultAppEnv     = "development"
-	defaultServerHost = "0.0.0.0"
-	defaultServerPort = 8080
+	defaultAppEnv      = "development"
+	defaultServerHost  = "0.0.0.0"
+	defaultServerPort  = 8080
+	defaultCallBackURL = "http://localhost:8080/auth/google/callback"
 )
 
 type Config struct {
-	AppEnv         string
-	ServerHost     string
-	ServerPort     uint
-	DatabaseURL    string
-	AllowedOrigins []string
-	FrontendURL    string
-	SessionSecret  string
-	GoogleClientID string
-	GoogleSecret   string
-	GoogleCallback string
-	DockerHost     string
+	AppEnv              string
+	ServerHost          string
+	ServerPort          uint
+	DatabaseURL         string
+	AllowedOrigins      []string
+	FrontendURL         string
+	SessionSecret       string
+	GoogleClientID      string
+	GoogleSecret        string
+	GoogleCallback      string
+	DockerHost          string
+	GoogleAllowedDomain string
 }
 
 // Load reads the optional .env file and the process environment, applies safe
@@ -76,6 +78,9 @@ func loadEnvironment() (*Config, error) {
 		GoogleSecret:   os.Getenv("GOOGLE_SECRET"),
 		GoogleCallback: strings.TrimSpace(os.Getenv("GOOGLE_CALL_BACK")),
 		DockerHost:     strings.TrimSpace(os.Getenv("DOCKER_HOST")),
+		GoogleAllowedDomain: strings.ToLower(
+			strings.TrimSpace(os.Getenv("GOOGLE_ALLOWED_DOMAIN")),
+		),
 	}, nil
 }
 
@@ -111,6 +116,40 @@ func (cfg *Config) validate() error {
 
 	if cfg.ServerPort == 0 || cfg.ServerPort > 65535 {
 		return errors.New("SERVER_PORT must be between 1 and 65535")
+	}
+
+	if cfg.GoogleClientID == "" {
+		return errors.New("Google_Client_ID is required")
+	}
+
+	if cfg.GoogleSecret == "" {
+		return errors.New("Google_secret is required")
+	}
+
+	if cfg.GoogleCallback == "" {
+		return errors.New("Google_call_back is reuired")
+	}
+
+	if cfg.GoogleAllowedDomain == "" {
+		return errors.New("Google_Allowed_Domains is required")
+	}
+
+	if cfg.FrontendURL == "" {
+		return errors.New("Frontend_URL is required")
+	}
+	
+	callback, err := url.Parse(cfg.GoogleCallback)
+	if err != nil || callback.Host == "" || callback.Path != "/api/v1/auth/google/callback"{
+		return errors.New("Google_Call_back should be API callback URL")
+	}
+	
+	frontend, err := url.Parse(cfg.FrontendURL)
+	if err != nil || frontend.Host == ""{
+		return errors.New("The Frontend URL must be an absolute URL")
+	}
+	
+	if cfg.AppEnv == "production" && (callback.Scheme != "https" || frontend.Scheme != "https"){
+		return errors.New("prodcution URLs must be HTTPS")
 	}
 
 	for _, origin := range cfg.AllowedOrigins {
