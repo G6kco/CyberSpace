@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"strings"
 	"time"
 
 	"github.com/G6kco/CyberSpace/internal/config"
@@ -84,10 +85,86 @@ func (g *GoogleLogin) Start(ctx context.Context) (authURL, bowserSecret string, 
 	}
 
 	authURL = g.oauth.AuthCodeURL(
-		state, 
-		oauth2.S256ChallengeOption(pkceVerifier), 
+		state,
+		oauth2.S256ChallengeOption(pkceVerifier),
 		oauth2.SetAuthURLParam("nonce", nonce),
 	)
-	
+
 	return authURL, browserSecret, nil
+}
+
+func (g *GoogleLogin) Complete(
+	ctx context.Context,
+	state, browserSecret, code string,
+) (string, error) {
+	if state == "" || browserSecret == "" || code == "" {
+		return "", ErrInvalidFlow
+	}
+
+	flow, err := g.repo.ConsumeFlow(
+		ctx,
+		sha256.Sum256([]byte(state)),
+		sha256.Sum256([]byte(browserSecret)),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	oauthToken, err := g.oauth.Exchange(
+		ctx,
+		code,
+		oauth2.VerifierOption(flow.Verifier),
+	)
+	if err != nil {
+		return "", ErrAccessDenied
+	}
+
+	rawIDToken, ok := oauthToken.Extra("id_token").(string)
+	if !ok {
+		return "", ErrAccessDenied
+	}
+
+	idToken, err := g.verifier.Verify(ctx, rawIDToken)
+	if err != nil || idToken.Nonce != flow.Nonce {
+		return "", ErrAccessDenied
+	}
+
+	var claims struct {
+		Email         string `json:"email"`
+		VerifiedEmail bool   `json:"email_verified"`
+		HostedDomain  string `json:"hd"`
+	}
+
+	if err := idToken.Claims(&claims); err != nil {
+		return "", ErrAccessDenied
+	}
+	if !claims.VerifiedEmail || strings.EqualFold(claims.HostedDomain, g.allowedDomains) {
+		return "", ErrAccessDenied
+	}
+
+	user, err := g.repo.FindOrBindUser(
+		ctx,
+		idToken.Subject,
+		claims.Email,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	sessionToken, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	sessionTokenHash := sha256.Sum256([]byte(sessionToken))
+
+	if err := g.repo.CreateSession(
+		ctx,
+		user.ID,
+		sessionTokenHash,
+		time.Now().UTC().Add(g.sessionTTL),
+	); err != nil {
+		return "", err
+	}
+
+	return sessionToken, nil
 }
