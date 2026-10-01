@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"time"
 
@@ -181,4 +182,24 @@ func (g *GoogleLogin) CurrentUser(
 		ctx,
 		sha256.Sum256([]byte(sessionToken)),
 	)
+}
+
+func (g *GoogleLogin) SignOut(
+	ctx context.Context,
+	sessionToken string,
+) error {
+	if sessionToken == "" {
+		return ErrUnauthenticated
+	}
+	
+	err :=  g.repo.RevokeSession(
+		ctx,
+		sha256.Sum256([]byte(sessionToken)),
+	)
+	
+	if errors.Is(err, ErrUnauthenticated) {
+		return nil
+	}
+	
+	return err
 }
