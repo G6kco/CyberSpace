@@ -16,7 +16,7 @@ const (
 	defaultAppEnv      = "development"
 	defaultServerHost  = "0.0.0.0"
 	defaultServerPort  = 8080
-	defaultCallBackURL = "http://localhost:8080/auth/google/callback"
+	// defaultCallBackURL = "http://localhost:8080/auth/google/callback"
 )
 
 type Config struct {

@@ -1,30 +1,234 @@
-import { ArrowRight, CalendarClock, CheckCircle2, Clock3, Info, ShieldCheck } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Button } from '../../components/ui/Button'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
-import { ProgressBar } from '../../components/ui/ProgressBar'
-import { SearchInput } from '../../components/ui/SearchInput'
-import { StatusBadge } from '../../components/ui/StatusBadge'
-import { useToast } from '../../components/ui/Toast'
-import { formatDateTime, lifecycleTone, minutesLabel } from '../../lib/format'
-import { platformRepository } from '../../services/repositories'
-import type { AssessmentLifecycle, StudentAssessment } from '../../types/domain'
+import {
+  ArrowRight,
+  CalendarClock,
+  CheckCircle2,
+  Clock3,
+  Info,
+  ShieldCheck,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Button } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import {
+  EmptyState,
+  ErrorState,
+  LoadingSkeleton,
+} from "../../components/ui/Feedback";
+import { ProgressBar } from "../../components/ui/ProgressBar";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { StatusBadge } from "../../components/ui/StatusBadge";
+import { useToast } from "../../components/ui/Toast";
+import { formatDateTime, lifecycleTone, minutesLabel } from "../../lib/format";
+import { platformRepository } from "../../services/repositories";
+import type {
+  AssessmentLifecycle,
+  StudentAssessment,
+} from "../../types/domain";
 
-const primaryLabel = (status: AssessmentLifecycle) => ({ 'Not booked': 'View eligibility', Booked: 'View booking', 'Awaiting approval': 'View status', Ready: 'Start assessment', Active: 'Resume workspace', Completed: 'Review attempt', Revoked: 'View decision', Expired: 'View details' }[status])
+const primaryLabel = (status: AssessmentLifecycle) =>
+  ({
+    "Not booked": "View eligibility",
+    Booked: "View booking",
+    "Awaiting approval": "View status",
+    Ready: "Start assessment",
+    Active: "Resume workspace",
+    Completed: "Review attempt",
+    Revoked: "View decision",
+    Expired: "View details",
+  })[status];
 
 export function AssessmentsPage() {
-  const [items, setItems] = useState<StudentAssessment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState<AssessmentLifecycle | 'All'>('All')
-  const [pendingStart, setPendingStart] = useState<StudentAssessment | null>(null)
-  const { notify } = useToast()
-  const navigate = useNavigate()
-  const load = () => { setLoading(true); platformRepository.listStudentAssessments().then(setItems).catch(() => setError('Assessment records could not be loaded.')).finally(() => setLoading(false)) }
-  useEffect(load, [])
-  const filtered = useMemo(() => items.filter((item) => (!search || item.name.toLowerCase().includes(search.toLowerCase())) && (status === 'All' || item.status === status)), [items, search, status])
-  return <div className="space-y-6"><div><p className="eyebrow">Assessment lifecycle</p><h2 className="page-heading">Your assessments</h2><p className="mt-2 max-w-2xl text-secondary">Booking details are imported from the college booking system. Assessment access is managed here.</p></div><div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-primary-light p-4 text-sm text-blue-900"><Info className="mt-0.5 h-5 w-5 shrink-0" /><p>Assessment labs are isolated and authorized for college testing only. Environment controls in this prototype are simulated.</p></div><section className="surface"><div className="grid gap-3 border-b border-border p-4 sm:grid-cols-[1fr_220px] sm:p-5"><SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search assessments" /><label><span className="sr-only">Assessment status</span><select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="input"><option>All</option><option>Not booked</option><option>Booked</option><option>Awaiting approval</option><option>Ready</option><option>Active</option><option>Completed</option><option>Revoked</option><option>Expired</option></select></label></div><div className="p-4 sm:p-5">{loading ? <LoadingSkeleton rows={5} /> : error ? <ErrorState message={error} onRetry={load} /> : filtered.length === 0 ? <EmptyState title="No assessments match" description="Adjust your search or status filter." /> : <div className="space-y-4">{filtered.map((item) => <article key={item.id} className="rounded-xl border border-border p-4 sm:p-5"><div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_210px_170px]"><div><div className="flex flex-wrap items-center gap-2"><StatusBadge tone={lifecycleTone(item.status)}>{item.status}</StatusBadge><span className="text-sm font-medium text-secondary">{item.level} · Attempt {item.attempt || '—'}</span></div><h3 className="mt-3 text-lg font-semibold text-strong">{item.name}</h3><div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-secondary"><span className="flex items-center gap-2"><CalendarClock className="h-4 w-4" />{formatDateTime(item.scheduledAt)}</span><span className="flex items-center gap-2"><Clock3 className="h-4 w-4" />{minutesLabel(item.duration)}</span></div><p className="mt-3 text-sm text-secondary"><span className="font-medium text-strong">Eligibility:</span> {item.eligibility}</p>{item.progress > 0 && <div className="mt-4 max-w-md"><ProgressBar value={item.progress} label="Attempt progress" /></div>}</div><div className="rounded-lg bg-app p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted">Next step</p><p className="mt-2 text-sm font-medium text-strong">{item.status === 'Ready' ? 'Launch within your scheduled window.' : item.status === 'Active' ? 'Your environment is available.' : item.status === 'Awaiting approval' ? 'An administrator must approve access.' : item.status === 'Completed' ? 'Attempt submitted successfully.' : 'Review the current record.'}</p></div><div className="flex items-center lg:justify-end">{item.status === 'Ready' ? <Button onClick={() => setPendingStart(item)}><ShieldCheck className="h-4 w-4" />{primaryLabel(item.status)}</Button> : <Link to={`/student/assessments/${item.id}`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3.5 text-sm font-semibold text-strong hover:bg-subtle">{item.status === 'Completed' && <CheckCircle2 className="h-4 w-4 text-success" />}{primaryLabel(item.status)}<ArrowRight className="h-4 w-4" /></Link>}</div></div></article>)}</div>}</div></section><ConfirmDialog open={Boolean(pendingStart)} title="Start assessment?" description="This will start the mock assessment timer and open the isolated workspace. Only continue during your authorized college testing window." confirmLabel="Start assessment" onCancel={() => setPendingStart(null)} onConfirm={async () => { if (!pendingStart) return; const updated = await platformRepository.updateStudentAssessment(pendingStart.id, { status: 'Active', environmentState: 'Stopped' }); setItems((records) => records.map((item) => item.id === updated.id ? updated : item)); setPendingStart(null); notify('Assessment started. The lab remains stopped until you launch it.'); navigate(`/student/assessments/${updated.id}`) }} /></div>
+  const [items, setItems] = useState<StudentAssessment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<AssessmentLifecycle | "All">("All");
+  const [pendingStart, setPendingStart] = useState<StudentAssessment | null>(
+    null,
+  );
+  const { notify } = useToast();
+  const navigate = useNavigate();
+  const load = () => {
+    setLoading(true);
+    platformRepository
+      .listStudentAssessments()
+      .then(setItems)
+      .catch(() => setError("Assessment records could not be loaded."))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+  const filtered = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          (!search || item.name.toLowerCase().includes(search.toLowerCase())) &&
+          (status === "All" || item.status === status),
+      ),
+    [items, search, status],
+  );
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="eyebrow">Assessment lifecycle</p>
+        <h2 className="page-heading">Your assessments</h2>
+        <p className="mt-2 max-w-2xl text-secondary">
+          Booking details are imported from the college booking system.
+          Assessment access is managed here.
+        </p>
+      </div>
+      <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-primary-light p-4 text-sm text-blue-900">
+        <Info className="mt-0.5 h-5 w-5 shrink-0" />
+        <p>
+          Assessment labs are isolated and authorized for college testing only.
+          Environment controls in this prototype are simulated.
+        </p>
+      </div>
+      <section className="surface">
+        <div className="grid gap-3 border-b border-border p-4 sm:grid-cols-[1fr_220px] sm:p-5">
+          <SearchInput
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search assessments"
+          />
+          <label>
+            <span className="sr-only">Assessment status</span>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as typeof status)}
+              className="input"
+            >
+              <option>All</option>
+              <option>Not booked</option>
+              <option>Booked</option>
+              <option>Awaiting approval</option>
+              <option>Ready</option>
+              <option>Active</option>
+              <option>Completed</option>
+              <option>Revoked</option>
+              <option>Expired</option>
+            </select>
+          </label>
+        </div>
+        <div className="p-4 sm:p-5">
+          {loading ? (
+            <LoadingSkeleton rows={5} />
+          ) : error ? (
+            <ErrorState message={error} onRetry={load} />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              title="No assessments match"
+              description="Adjust your search or status filter."
+            />
+          ) : (
+            <div className="space-y-4">
+              {filtered.map((item) => (
+                <article
+                  key={item.id}
+                  className="rounded-xl border border-border p-4 sm:p-5"
+                >
+                  <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_210px_170px]">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge tone={lifecycleTone(item.status)}>
+                          {item.status}
+                        </StatusBadge>
+                        <span className="text-sm font-medium text-secondary">
+                          {item.level} · Attempt {item.attempt || "—"}
+                        </span>
+                      </div>
+                      <h3 className="mt-3 text-lg font-semibold text-strong">
+                        {item.name}
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-secondary">
+                        <span className="flex items-center gap-2">
+                          <CalendarClock className="h-4 w-4" />
+                          {formatDateTime(item.scheduledAt)}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Clock3 className="h-4 w-4" />
+                          {minutesLabel(item.duration)}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-sm text-secondary">
+                        <span className="font-medium text-strong">
+                          Eligibility:
+                        </span>{" "}
+                        {item.eligibility}
+                      </p>
+                      {item.progress > 0 && (
+                        <div className="mt-4 max-w-md">
+                          <ProgressBar
+                            value={item.progress}
+                            label="Attempt progress"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-lg bg-app p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                        Next step
+                      </p>
+                      <p className="mt-2 text-sm font-medium text-strong">
+                        {item.status === "Ready"
+                          ? "Launch within your scheduled window."
+                          : item.status === "Active"
+                            ? "Your environment is available."
+                            : item.status === "Awaiting approval"
+                              ? "An administrator must approve access."
+                              : item.status === "Completed"
+                                ? "Attempt submitted successfully."
+                                : "Review the current record."}
+                      </p>
+                    </div>
+                    <div className="flex items-center lg:justify-end">
+                      {item.status === "Ready" ? (
+                        <Button onClick={() => setPendingStart(item)}>
+                          <ShieldCheck className="h-4 w-4" />
+                          {primaryLabel(item.status)}
+                        </Button>
+                      ) : (
+                        <Link
+                          to={`/student/assessments/${item.id}`}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3.5 text-sm font-semibold text-strong hover:bg-subtle"
+                        >
+                          {item.status === "Completed" && (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          )}
+                          {primaryLabel(item.status)}
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+      <ConfirmDialog
+        open={Boolean(pendingStart)}
+        title="Start assessment?"
+        description="This will start the mock assessment timer and open the isolated workspace. Only continue during your authorized college testing window."
+        confirmLabel="Start assessment"
+        onCancel={() => setPendingStart(null)}
+        onConfirm={async () => {
+          if (!pendingStart) return;
+          const updated = await platformRepository.updateStudentAssessment(
+            pendingStart.id,
+            { status: "Active", environmentState: "Stopped" },
+          );
+          setItems((records) =>
+            records.map((item) => (item.id === updated.id ? updated : item)),
+          );
+          setPendingStart(null);
+          notify(
+            "Assessment started. The lab remains stopped until you launch it.",
+          );
+          navigate(`/student/assessments/${updated.id}`);
+        }}
+      />
+    </div>
+  );
 }
