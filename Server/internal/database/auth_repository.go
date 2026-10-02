@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/G6kco/CyberSpace/internal/auth"
 )
@@ -165,4 +166,23 @@ func (r *AuthRepository) FindOrBindUser(
         return auth.User{}, err
     }
     return user, nil
+}
+
+func (r *AuthRepository) CreateSession(
+	ctx context.Context,
+	userID uint64,
+	tokenhash [32]byte,
+	expiresAt time.Time,
+) error {
+	_, err := r.db.ExecContext(
+		ctx,
+		`INSERT INTO auth_sessions
+        (user_id, token_hash, last_seen_at,
+        expires_at, created_at)
+        VALUES (?, ?, UTC_TIMESTAMP(6), ?, UTC_TIMESTAMP(6))`,
+		userID,
+		tokenhash[:],
+		expiresAt,
+	)
+	return err
 }
