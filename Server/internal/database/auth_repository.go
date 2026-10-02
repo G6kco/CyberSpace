@@ -84,3 +84,85 @@ func (r *AuthRepository) ConsumeFlow(
 	
 	return flow, nil
 }
+
+func (r *AuthRepository) FindOrBindUser(
+	ctx context.Context,
+	subject, email string,
+) (auth.User, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return auth.User{}, err
+	}
+	defer tx.Rollback()
+	
+	var user auth.User
+	var status string
+	var savedSubject sql.NullString
+	
+	scan := func(row *sql.Row) error {
+		return row.Scan(
+			&user.ID,
+			&user.PublicID,
+			&user.Name,
+			&user.Email,
+			&user.Role,
+			&status,
+			&savedSubject,
+		)
+	}
+	
+	err = scan(tx.QueryRowContext(
+		ctx,
+		` SELECT id, public_id, email, display_name, role,
+               status, google_subject
+        FROM users
+        WHERE google_subject = ?
+        FOR UPDATE`,
+		subject,
+	))
+	
+	if errors.Is(err, sql.ErrNoRows) {
+		err = scan(tx.QueryRowContext(
+			ctx,
+			`SELECT id, public_id, email, display_name, role,
+                   status, google_subject
+            FROM users
+            WHERE email = ?
+            FOR UPDATE;`,
+			email,
+		))
+	}
+	
+	if errors.Is(err, sql.ErrNoRows) {
+		return auth.User{}, err
+	}
+	
+	if status != "active" {
+		return auth.User{}, auth.ErrAccessDenied
+	}
+	
+	if savedSubject.Valid && savedSubject.String != subject {
+		return auth.User{}, auth.ErrAccessDenied
+	}
+	
+	if !savedSubject.Valid {
+        _, err = tx.ExecContext(ctx, `
+            UPDATE users
+            SET google_subject = ?, last_login_at = UTC_TIMESTAMP(6)
+            WHERE id = ? AND google_subject IS NULL
+        `, subject, user.ID)
+    } else {
+        _, err = tx.ExecContext(ctx, `
+            UPDATE users
+            SET last_login_at = UTC_TIMESTAMP(6)
+            WHERE id = ?
+        `, user.ID)
+    }
+    if err != nil {
+        return auth.User{}, err
+    }
+    if err := tx.Commit(); err != nil {
+        return auth.User{}, err
+    }
+    return user, nil
+}
