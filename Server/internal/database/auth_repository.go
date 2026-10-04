@@ -186,3 +186,34 @@ func (r *AuthRepository) CreateSession(
 	)
 	return err
 }
+
+func (r *AuthRepository) ResolveSession(
+	ctx context.Context,
+	tokenHash [32]byte,
+) (auth.User, error) {
+	var user auth.User
+	
+	err := r.db.QueryRowContext(ctx, 
+		`SELECT u.id, u.public_id, u.display_name,
+               u.email, u.role
+        FROM auth_sessions AS s
+        JOIN users AS u ON u.id = s.user_id
+        WHERE s.token_hash = ?
+          AND s.revoked_at IS NULL
+          AND s.expires_at > UTC_TIMESTAMP(6)
+          AND u.status = 'active'`,
+		tokenHash[:],
+	).Scan(
+		&user.ID,
+        &user.PublicID,
+        &user.Name,
+        &user.Email,
+        &user.Role,
+	)
+	
+	if errors.Is(err, sql.ErrNoRows){
+		return auth.User{}, auth.ErrUnauthenticated
+	}
+	
+	return user, err
+}
