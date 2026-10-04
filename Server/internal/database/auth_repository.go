@@ -36,16 +36,16 @@ func (r *AuthRepository) SaveFlow(
 
 func (r *AuthRepository) ConsumeFlow(
 	ctx context.Context,
-	stateHash, browserHash [32]byte, 
+	stateHash, browserHash [32]byte,
 ) (auth.LoginFlow, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return auth.LoginFlow{}, err
 	}
 	defer tx.Rollback()
-	
+
 	var flow auth.LoginFlow
-	
+
 	err = tx.QueryRowContext(
 		ctx,
 		`SELECT nonce, pkce_verifier
@@ -61,14 +61,14 @@ func (r *AuthRepository) ConsumeFlow(
 		&flow.Nonce,
 		&flow.Verifier,
 	)
-	
-	if errors.Is(err, sql.ErrNoRows){
+
+	if errors.Is(err, sql.ErrNoRows) {
 		return auth.LoginFlow{}, auth.ErrInvalidFlow
 	}
-	if err != nil{
+	if err != nil {
 		return auth.LoginFlow{}, err
 	}
-	
+
 	_, err = tx.ExecContext(
 		ctx,
 		`UPDATE oauth_login_flows
@@ -76,13 +76,13 @@ func (r *AuthRepository) ConsumeFlow(
         WHERE state_hash = ?`,
 		stateHash[:],
 	)
-	if err  != nil {
+	if err != nil {
 		return auth.LoginFlow{}, err
 	}
-	if err := tx.Commit(); err != nil{
+	if err := tx.Commit(); err != nil {
 		return auth.LoginFlow{}, err
 	}
-	
+
 	return flow, nil
 }
 
@@ -95,11 +95,11 @@ func (r *AuthRepository) FindOrBindUser(
 		return auth.User{}, err
 	}
 	defer tx.Rollback()
-	
+
 	var user auth.User
 	var status string
 	var savedSubject sql.NullString
-	
+
 	scan := func(row *sql.Row) error {
 		return row.Scan(
 			&user.ID,
@@ -111,7 +111,7 @@ func (r *AuthRepository) FindOrBindUser(
 			&savedSubject,
 		)
 	}
-	
+
 	err = scan(tx.QueryRowContext(
 		ctx,
 		` SELECT id, public_id, email, display_name, role,
@@ -121,7 +121,7 @@ func (r *AuthRepository) FindOrBindUser(
         FOR UPDATE`,
 		subject,
 	))
-	
+
 	if errors.Is(err, sql.ErrNoRows) {
 		err = scan(tx.QueryRowContext(
 			ctx,
@@ -133,39 +133,39 @@ func (r *AuthRepository) FindOrBindUser(
 			email,
 		))
 	}
-	
+
 	if errors.Is(err, sql.ErrNoRows) {
 		return auth.User{}, err
 	}
-	
+
 	if status != "active" {
 		return auth.User{}, auth.ErrAccessDenied
 	}
-	
+
 	if savedSubject.Valid && savedSubject.String != subject {
 		return auth.User{}, auth.ErrAccessDenied
 	}
-	
+
 	if !savedSubject.Valid {
-        _, err = tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
             UPDATE users
             SET google_subject = ?, last_login_at = UTC_TIMESTAMP(6)
             WHERE id = ? AND google_subject IS NULL
         `, subject, user.ID)
-    } else {
-        _, err = tx.ExecContext(ctx, `
+	} else {
+		_, err = tx.ExecContext(ctx, `
             UPDATE users
             SET last_login_at = UTC_TIMESTAMP(6)
             WHERE id = ?
         `, user.ID)
-    }
-    if err != nil {
-        return auth.User{}, err
-    }
-    if err := tx.Commit(); err != nil {
-        return auth.User{}, err
-    }
-    return user, nil
+	}
+	if err != nil {
+		return auth.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return auth.User{}, err
+	}
+	return user, nil
 }
 
 func (r *AuthRepository) CreateSession(
@@ -192,8 +192,8 @@ func (r *AuthRepository) ResolveSession(
 	tokenHash [32]byte,
 ) (auth.User, error) {
 	var user auth.User
-	
-	err := r.db.QueryRowContext(ctx, 
+
+	err := r.db.QueryRowContext(ctx,
 		`SELECT u.id, u.public_id, u.display_name,
                u.email, u.role
         FROM auth_sessions AS s
@@ -205,15 +205,31 @@ func (r *AuthRepository) ResolveSession(
 		tokenHash[:],
 	).Scan(
 		&user.ID,
-        &user.PublicID,
-        &user.Name,
-        &user.Email,
-        &user.Role,
+		&user.PublicID,
+		&user.Name,
+		&user.Email,
+		&user.Role,
 	)
-	
-	if errors.Is(err, sql.ErrNoRows){
+
+	if errors.Is(err, sql.ErrNoRows) {
 		return auth.User{}, auth.ErrUnauthenticated
 	}
-	
+
 	return user, err
+}
+
+func (r *AuthRepository) RevokeSession(
+	ctx context.Context,
+	tokenHash [32]byte,
+) error {
+	_, err := r.db.ExecContext(
+		ctx,
+		`UPDATE auth_sessions
+        SET revoked_at = UTC_TIMESTAMP(6),
+            revocation_reason = 'user_logout'
+        WHERE token_hash = ?
+          AND revoked_at IS NULL`,
+		tokenHash[:],
+	)
+	return err
 }
