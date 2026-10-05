@@ -3,6 +3,8 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/gin-gonic/gin"
@@ -84,6 +86,7 @@ func (h *authHandler) callBack(c *gin.Context) {
 			"code" : "auth_unavailable",
 			"message" : "Login is unavailable",
 		})
+		return
 	}
 	
 	http.SetCookie(c.Writer, &http.Cookie{
@@ -95,4 +98,78 @@ func (h *authHandler) callBack(c *gin.Context) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	c.Redirect(http.StatusSeeOther, h.frontendURL)
+}
+
+func (h *authHandler) requireSession() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		_, sessionCookie := cookieNames(h.secure)
+		cookie, err := c.Request.Cookie(sessionCookie)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code": "unauthorized",
+				"message": "Sign in required",
+			})
+			return
+		}
+		
+		user, err := h.login.CurrentUser(
+			c.Request.Context(),
+			cookie.Value,
+		)
+		if errors.Is(err , auth.ErrUnauthenticated) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code" : "unathenticated",
+				"message" : "Sign in required",
+			})
+			return
+		}
+		if err != nil {
+            c.AbortWithStatusJSON(503, gin.H{
+                "code": "auth_unavailable",
+                "message": "Authentication unavailable",
+            })
+            return
+        }
+		
+		c.Set("currentUser", user)
+		c.Set("sessionToken", cookie.Value)
+		c.Next()
+	}
+}
+
+func (h *authHandler) me(c *gin.Context) {
+	user := c.MustGet("currentUser").(auth.User)
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *authHandler) logout(c *gin.Context) {
+	frontend, _ := url.Parse(h.frontendURL)
+	allowedOrigins := frontend.Scheme + "://" + frontend.Host
+	if !strings.EqualFold(c.GetHeader("Origin"), allowedOrigins) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code" : "bad_origin",
+			"message" : "Request origin not allowed",
+		})
+		return
+	}
+	
+	token := c.MustGet("sessionToken").(string)
+	if err := h.login.SignOut(c.Request.Context(), token); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code" : "auth_unavailable",
+			"message" : "Cannot sign out",
+		})
+		return
+	}
+	
+	_, sessionCookie := cookieNames(h.secure)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: sessionCookie,
+		Path: "/",
+		MaxAge: -1,
+		Secure: h.secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	c.Status(http.StatusNoContent)
 }
