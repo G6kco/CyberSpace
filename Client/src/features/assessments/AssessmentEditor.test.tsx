@@ -9,7 +9,7 @@ describe('assessment editor', () => {
   it('runs frontend YAML validation without executing configuration', async () => {
     const user = userEvent.setup()
     renderApp('/admin/assessments/new')
-    await user.click(screen.getByRole('button', { name: /Lab environment/ }))
+    await user.click(await screen.findByRole('button', { name: /Lab environment/ }))
     await user.click(screen.getByRole('button', { name: 'Validate YAML' }))
     expect(screen.getByText(/Basic frontend checks passed/)).toBeInTheDocument()
   })
@@ -17,7 +17,7 @@ describe('assessment editor', () => {
   it('adds and reorders questions', async () => {
     const user = userEvent.setup()
     renderApp('/admin/assessments/new')
-    await user.click(screen.getByRole('button', { name: /Questions/ }))
+    await user.click(await screen.findByRole('button', { name: /Questions/ }))
     await user.click(screen.getByRole('button', { name: 'Add question' }))
     await user.click(screen.getByRole('button', { name: 'Add question' }))
     expect(screen.getByText('Question 2')).toBeInTheDocument()

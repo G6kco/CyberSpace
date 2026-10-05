@@ -1,34 +1,37 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { renderApp, setSession } from '../test/renderApp'
 
 describe('authentication and role routing', () => {
   beforeEach(() => setSession(null))
 
-  it('redirects a signed-out user to login', () => {
+  it('redirects a signed-out user to login', async () => {
     renderApp('/student/learning')
-    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
   })
 
-  it('restores a persisted student session', async () => {
+  it('restores a session reported by the server', async () => {
     setSession('student')
     renderApp('/student/learning')
     expect(await screen.findByRole('heading', { name: /Build skills before your next assessment/i })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'student navigation' })).toBeInTheDocument()
   })
 
-  it('blocks students from administrator routes', () => {
+  it('derives display initials from the name the server sends', async () => {
     setSession('student')
-    renderApp('/admin/monitoring')
-    expect(screen.getByRole('heading', { name: 'Access denied' })).toBeInTheDocument()
+    renderApp('/student/learning')
+    expect(await screen.findAllByText('MI')).not.toHaveLength(0)
   })
 
-  it('enters the selected administrator demo role', async () => {
-    const user = userEvent.setup()
+  it('blocks students from administrator routes', async () => {
+    setSession('student')
+    renderApp('/admin/monitoring')
+    expect(await screen.findByRole('heading', { name: 'Access denied' })).toBeInTheDocument()
+  })
+
+  it('offers Google sign-in instead of a password form', async () => {
     renderApp('/login')
-    await user.click(screen.getByRole('button', { name: 'Administrator' }))
-    await user.click(screen.getByRole('button', { name: 'Sign in as administrator' }))
-    expect(await screen.findByRole('heading', { name: /Student assessment monitoring/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Continue with Google/i })).toBeEnabled()
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument()
   })
 })

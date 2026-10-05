@@ -1,41 +1,48 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
-import { demoUsers } from '../../mocks/data'
-import type { Role, User } from '../../types/domain'
-
-const SESSION_KEY = 'cyberspace-demo-session'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { endSession, getCurrentUser, startGoogleLogin } from '../../services/auth'
+import type { User } from '../../types/domain'
 
 interface AuthContextValue {
   user: User | null
-  signIn: (role: Role) => void
-  signOut: () => void
+  loading: boolean
+  error: string | null
+  signIn: () => void
+  signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function loadSession(): User | null {
-  try {
-    const value = localStorage.getItem(SESSION_KEY)
-    return value ? (JSON.parse(value) as User) : null
-  } catch {
-    return null
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(loadSession)
-  const value = useMemo<AuthContextValue>(() => ({
-    user,
-    signIn: (role) => {
-      const next = demoUsers[role]
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-      setUser(next)
-    },
-    signOut: () => {
-      localStorage.removeItem(SESSION_KEY)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // The session lives in an HTTP-only cookie the client cannot read, so the
+  // server is asked who the user is on every page load.
+  useEffect(() => {
+    getCurrentUser()
+      .then(setUser)
+      .catch(() => setError('Could not check your session'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function signOut() {
+    try {
+      await endSession()
       setUser(null)
-    },
-  }), [user])
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+      setError(null)
+    } catch {
+      setError('Could not sign out')
+    }
+  }
+
+  return (
+    <AuthContext.Provider
+      value={{ user, loading, error, signIn: startGoogleLogin, signOut }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {
