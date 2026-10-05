@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/G6kco/CyberSpace/internal/config"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,7 @@ type App struct {
 	Config *config.Config
 	DB     Database
 	Logger *zap.Logger
+	Auth   *auth.GoogleLogin
 }
 
 // New creates a dependency container and rejects incomplete startup wiring.

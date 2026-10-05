@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	defaultAppEnv      = "development"
-	defaultServerHost  = "0.0.0.0"
-	defaultServerPort  = 8080
+	defaultAppEnv     = "development"
+	defaultServerHost = "0.0.0.0"
+	defaultServerPort = 8080
 	// defaultCallBackURL = "http://localhost:8080/auth/google/callback"
 )
 
@@ -137,18 +137,18 @@ func (cfg *Config) validate() error {
 	if cfg.FrontendURL == "" {
 		return errors.New("Frontend_URL is required")
 	}
-	
+
 	callback, err := url.Parse(cfg.GoogleCallback)
-	if err != nil || callback.Host == "" || callback.Path != "/api/v1/auth/google/callback"{
+	if err != nil || callback.Host == "" || callback.Path != "/api/v1/auth/google/callback" {
 		return errors.New("Google_Call_back should be API callback URL")
 	}
-	
+
 	frontend, err := url.Parse(cfg.FrontendURL)
-	if err != nil || frontend.Host == ""{
+	if err != nil || frontend.Host == "" {
 		return errors.New("The Frontend URL must be an absolute URL")
 	}
-	
-	if cfg.AppEnv == "production" && (callback.Scheme != "https" || frontend.Scheme != "https"){
+
+	if cfg.AppEnv == "production" && (callback.Scheme != "https" || frontend.Scheme != "https") {
 		return errors.New("prodcution URLs must be HTTPS")
 	}
 
