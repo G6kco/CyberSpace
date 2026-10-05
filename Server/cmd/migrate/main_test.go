@@ -97,10 +97,13 @@ func TestEmbeddedMigrationsAreSequential(t *testing.T) {
 	if first != 1 {
 		t.Errorf("first migration version = %d, want 1", first)
 	}
-	if count != 29 {
-		t.Errorf("embedded migration count = %d, want 29", count)
-	}
-	if last != 29 {
-		t.Errorf("last migration version = %d, want 29", last)
+	// Versions are derived rather than hardcoded so that adding a migration
+	// does not require editing this test. The loop above proves each step is
+	// exactly +1; this asserts the resulting range has no gaps or duplicates.
+	if count != int(last) {
+		t.Errorf(
+			"embedded migration count = %d, want %d (versions 1..%d with no gaps)",
+			count, last, last,
+		)
 	}
 }

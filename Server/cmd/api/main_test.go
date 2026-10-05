@@ -55,7 +55,7 @@ func TestRunRejectsMissingDatabaseURL(t *testing.T) {
 }
 
 func TestRunReturnsDatabaseConnectionError(t *testing.T) {
-	t.Setenv("APP_ENV", "development")
+	setValidEnvironment(t)
 	t.Setenv("DATABASE_URL", "user:password@tcp(localhost:3306")
 
 	err := run()
@@ -65,5 +65,31 @@ func TestRunReturnsDatabaseConnectionError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "connect to database") {
 		t.Fatalf("run() error = %q, want it to contain %q", err, "connect to database")
+	}
+}
+
+// setValidEnvironment installs a configuration that passes validation, so a
+// test can break one variable and reach the startup stage it means to exercise.
+// The values are placeholders in reserved test domains, not credentials.
+func setValidEnvironment(t *testing.T) {
+	t.Helper()
+
+	values := map[string]string{
+		"APP_ENV":               "development",
+		"SERVER_HOST":           "0.0.0.0",
+		"SERVER_PORT":           "8080",
+		"DATABASE_URL":          "user:password@tcp(localhost:3306)/cyberspace",
+		"CORS_ORIGIN_ALLOWED":   "",
+		"FRONTEND_URL":          "https://app.example.test",
+		"SESSION_SECRET":        "test-session-secret",
+		"GOOGLE_CLIENT_ID":      "test-client-id.apps.googleusercontent.com",
+		"GOOGLE_SECRET":         "test-client-secret",
+		"GOOGLE_CALL_BACK":      "https://api.example.test/api/v1/auth/google/callback",
+		"GOOGLE_ALLOWED_DOMAIN": "example.test",
+		"DOCKER_HOST":           "",
+	}
+
+	for key, value := range values {
+		t.Setenv(key, value)
 	}
 }

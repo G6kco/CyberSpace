@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	ErrInvalidFlow     error = errors.New("Invalid or expired login flow")
+	ErrInvalidFlow     error = errors.New("invalid or expired login flow")
 	ErrAccessDenied    error = errors.New("account is not allowed")
 	ErrUnauthenticated error = errors.New("session is not valid")
 )
@@ -31,7 +31,7 @@ type User struct {
 type Repository interface {
 	SaveFlow(ctx context.Context, flow LoginFlow) error
 	ConsumeFlow(ctx context.Context, stateHash, browserHash [32]byte) (LoginFlow, error)
-	FindOrBindUser(ctx context.Context, googleSubject, varifiedEmail string) (User, error)
+	FindOrBindUser(ctx context.Context, googleSubject, verifiedEmail string) (User, error)
 	CreateSession(ctx context.Context, userID uint64, tokenHash [32]byte, expiresAt time.Time) error
 	ResolveSession(ctx context.Context, tokenHash [32]byte) (User, error)
 	RevokeSession(ctx context.Context, tokenHash [32]byte) error

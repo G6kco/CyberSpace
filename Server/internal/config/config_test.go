@@ -98,6 +98,38 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			value: "admin.example.com/path",
 			want:  `CORS_ORIGIN_ALLOWED contains invalid origin "admin.example.com/path"`,
 		},
+		{
+			name: "missing Google client ID",
+			key:  "GOOGLE_CLIENT_ID",
+			want: "Google_Client_ID is required",
+		},
+		{
+			name: "missing Google secret",
+			key:  "GOOGLE_SECRET",
+			want: "Google_secret is required",
+		},
+		{
+			name: "missing Google allowed domain",
+			key:  "GOOGLE_ALLOWED_DOMAIN",
+			want: "Google_Allowed_Domains is required",
+		},
+		{
+			name: "missing frontend URL",
+			key:  "FRONTEND_URL",
+			want: "Frontend_URL is required",
+		},
+		{
+			name:  "callback is not the API callback path",
+			key:   "GOOGLE_CALL_BACK",
+			value: "https://api.example.test/oauth2/callback",
+			want:  "Google_Call_back should be API callback URL",
+		},
+		{
+			name:  "frontend URL is not absolute",
+			key:   "FRONTEND_URL",
+			value: "/app",
+			want:  "The Frontend URL must be an absolute URL",
+		},
 	}
 
 	for _, test := range tests {
@@ -116,21 +148,28 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+// setBaseEnvironment installs a complete, valid configuration so that each test
+// can invalidate exactly one variable. Every variable Load reads is set here,
+// including the ones left empty, so tests never inherit the developer's shell.
+//
+// These are placeholders in reserved test domains, not credentials. The tests
+// exercise validation rules, never a real Google account.
 func setBaseEnvironment(t *testing.T) {
 	t.Helper()
 
 	values := map[string]string{
-		"APP_ENV":             "development",
-		"SERVER_HOST":         "0.0.0.0",
-		"SERVER_PORT":         "8080",
-		"DATABASE_URL":        "user:password@tcp(localhost:3306)/cyberspace",
-		"CORS_ORIGIN_ALLOWED": "",
-		"FRONTEND_URL":        "",
-		"SESSION_SECRET":      "",
-		"GOOGLE_CLIENT_ID":    "",
-		"GOOGLE_SECRET":       "",
-		"GOOGLE_CALL_BACK":    "",
-		"DOCKER_HOST":         "",
+		"APP_ENV":               "development",
+		"SERVER_HOST":           "0.0.0.0",
+		"SERVER_PORT":           "8080",
+		"DATABASE_URL":          "user:password@tcp(localhost:3306)/cyberspace",
+		"CORS_ORIGIN_ALLOWED":   "",
+		"FRONTEND_URL":          "https://app.example.test",
+		"SESSION_SECRET":        "test-session-secret",
+		"GOOGLE_CLIENT_ID":      "test-client-id.apps.googleusercontent.com",
+		"GOOGLE_SECRET":         "test-client-secret",
+		"GOOGLE_CALL_BACK":      "https://api.example.test/api/v1/auth/google/callback",
+		"GOOGLE_ALLOWED_DOMAIN": "example.test",
+		"DOCKER_HOST":           "",
 	}
 
 	for key, value := range values {

@@ -15,19 +15,32 @@ import { roleLanding } from './navigation'
 import type { ReactNode } from 'react'
 import type { Role } from '../types/domain'
 
+// Until GET /api/v1/me answers, the signed-in state is unknown. Rendering a
+// placeholder keeps the guards from redirecting a signed-in user to /login on
+// every page load.
+function SessionCheck() {
+  return <div className="grid min-h-screen place-items-center text-secondary">Checking your session…</div>
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
   const location = useLocation()
+  if (loading) return <SessionCheck />
   return user ? children : <Navigate to="/login" state={{ from: location.pathname }} replace />
 }
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+  if (loading) return <SessionCheck />
   if (!user) return <Navigate to="/login" replace />
   return user.role === role ? children : <Navigate to="/unauthorized" replace />
 }
 
-function HomeRedirect() { const { user } = useAuth(); return <Navigate to={user ? roleLanding[user.role] : '/login'} replace /> }
+function HomeRedirect() {
+  const { user, loading } = useAuth()
+  if (loading) return <SessionCheck />
+  return <Navigate to={user ? roleLanding[user.role] : '/login'} replace />
+}
 
 export function AppRoutes() {
   return <Routes>
