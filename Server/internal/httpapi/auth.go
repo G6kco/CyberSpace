@@ -8,10 +8,12 @@ import (
 
 	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type authHandler struct {
 	login       *auth.GoogleLogin
+	logger      *zap.Logger
 	frontendURL string
 	secure      bool
 }
@@ -26,6 +28,7 @@ func cookieNames(secure bool) (login, session string) {
 func (h *authHandler) start(c *gin.Context) {
 	authURL, browserSecret, err := h.login.Start(c.Request.Context())
 	if err != nil {
+		h.logger.Error("Cannot start login", zap.Error(err))
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    "auth_unavailable",
 			"message": "Cannot start login",
@@ -43,15 +46,15 @@ func (h *authHandler) start(c *gin.Context) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	c.Redirect(http.StatusAccepted, authURL)
+	c.Redirect(http.StatusFound, authURL)
 }
 
-func (h *authHandler) callBack(c *gin.Context) {
+func (h *authHandler) callback(c *gin.Context) {
 	loginCookie, sessionCookie := cookieNames(h.secure)
 	browserCookie, err := c.Request.Cookie(loginCookie)
 	if err != nil || c.Query("error") != "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    "invlaid_login",
+			"code":    "invalid_login",
 			"message": "Login failed or expired",
 		})
 		return
@@ -76,12 +79,16 @@ func (h *authHandler) callBack(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidFlow) ||
 			errors.Is(err, auth.ErrAccessDenied) {
+			// The browser gets one generic message so that a failed login
+			// reveals nothing about why. The reason goes to the log instead.
+			h.logger.Warn("Login refused", zap.Error(err))
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    "invalid_login",
 				"message": "Login was not accepted",
 			})
 			return
 		}
+		h.logger.Error("Login failed unexpectedly", zap.Error(err))
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    "auth_unavailable",
 			"message": "Login is unavailable",
@@ -93,6 +100,7 @@ func (h *authHandler) callBack(c *gin.Context) {
 		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
+		MaxAge:   int(h.login.SessionTTL().Seconds()),
 		Secure:   h.secure,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -118,13 +126,14 @@ func (h *authHandler) requireSession() gin.HandlerFunc {
 		)
 		if errors.Is(err, auth.ErrUnauthenticated) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    "unathenticated",
+				"code":    "unauthenticated",
 				"message": "Sign in required",
 			})
 			return
 		}
 		if err != nil {
-			c.AbortWithStatusJSON(503, gin.H{
+			h.logger.Error("Session lookup failed", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"code":    "auth_unavailable",
 				"message": "Authentication unavailable",
 			})
@@ -143,9 +152,11 @@ func (h *authHandler) me(c *gin.Context) {
 }
 
 func (h *authHandler) logout(c *gin.Context) {
+	// Logout changes server state through a cookie the browser attaches
+	// automatically, so the origin is checked to reject cross-site callers.
 	frontend, _ := url.Parse(h.frontendURL)
-	allowedOrigins := frontend.Scheme + "://" + frontend.Host
-	if !strings.EqualFold(c.GetHeader("Origin"), allowedOrigins) {
+	allowedOrigin := frontend.Scheme + "://" + frontend.Host
+	if !strings.EqualFold(c.GetHeader("Origin"), allowedOrigin) {
 		c.JSON(http.StatusForbidden, gin.H{
 			"code":    "bad_origin",
 			"message": "Request origin not allowed",
@@ -155,6 +166,7 @@ func (h *authHandler) logout(c *gin.Context) {
 
 	token := c.MustGet("sessionToken").(string)
 	if err := h.login.SignOut(c.Request.Context(), token); err != nil {
+		h.logger.Error("Cannot sign out", zap.Error(err))
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    "auth_unavailable",
 			"message": "Cannot sign out",

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/G6kco/CyberSpace/internal/app"
+	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/G6kco/CyberSpace/internal/config"
 	"github.com/G6kco/CyberSpace/internal/database"
 	"github.com/G6kco/CyberSpace/internal/httpapi"
@@ -73,12 +74,27 @@ func run() error {
 	}
 	log.Info("Application dependencies initialized")
 
+	// 5. Build Google sign-in. NewGoogleLogin performs OIDC discovery, so a
+	// server that cannot reach Google's configuration fails here at startup
+	// rather than on a user's first login attempt.
+	googleLogin, err := auth.NewGoogleLogin(
+		context.Background(),
+		cfg,
+		database.NewAuthRepository(db),
+	)
+	if err != nil {
+		log.Error("Google login initialization failed", zap.Error(err))
+		return fmt.Errorf("initialize Google login: %w", err)
+	}
+	application.Auth = googleLogin
+	log.Info("Google login initialized")
+
 	engine := httpapi.NewRouter(application)
 
-	// 5. Construct an explicit HTTP server.
+	// 6. Construct an explicit HTTP server.
 	httpServer := newHTTPServer(cfg.ServerHost, cfg.ServerPort, engine)
 
-	// 6. Start the HTTP server without blocking signal handling.
+	// 7. Start the HTTP server without blocking signal handling.
 	serverErrors := make(chan error, 1)
 
 	go func() {
@@ -96,7 +112,7 @@ func run() error {
 		}
 	}()
 
-	// 7. Listen for Ctrl+C, Docker stop, or system termination.
+	// 8. Listen for Ctrl+C, Docker stop, or system termination.
 	shutdownContext, stopSignals := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -116,7 +132,7 @@ func run() error {
 	// Stop receiving further shutdown signals.
 	stopSignals()
 
-	// 8. Allow active requests up to 10 seconds to finish.
+	// 9. Allow active requests up to 10 seconds to finish.
 	timeoutContext, cancel := context.WithTimeout(
 		context.Background(),
 		10*time.Second,

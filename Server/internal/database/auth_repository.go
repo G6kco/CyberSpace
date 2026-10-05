@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/G6kco/CyberSpace/internal/auth"
@@ -38,7 +39,7 @@ func (r *AuthRepository) ConsumeFlow(
 	ctx context.Context,
 	stateHash, browserHash [32]byte,
 ) (auth.LoginFlow, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return auth.LoginFlow{}, err
 	}
@@ -90,7 +91,7 @@ func (r *AuthRepository) FindOrBindUser(
 	ctx context.Context,
 	subject, email string,
 ) (auth.User, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return auth.User{}, err
 	}
@@ -104,8 +105,8 @@ func (r *AuthRepository) FindOrBindUser(
 		return row.Scan(
 			&user.ID,
 			&user.PublicID,
-			&user.Name,
 			&user.Email,
+			&user.Name,
 			&user.Role,
 			&status,
 			&savedSubject,
@@ -134,16 +135,33 @@ func (r *AuthRepository) FindOrBindUser(
 		))
 	}
 
+	// CyberSpace never self-registers an account: a student or administrator
+	// must already exist before they can sign in, so an unknown Google identity
+	// is a refusal rather than a server fault.
 	if errors.Is(err, sql.ErrNoRows) {
+		return auth.User{}, fmt.Errorf(
+			"%w: no user row for email %q",
+			auth.ErrAccessDenied, email,
+		)
+	}
+	// Any other scan error is a real database fault and must not be reported
+	// as a refusal by falling through to the status check below.
+	if err != nil {
 		return auth.User{}, err
 	}
 
 	if status != "active" {
-		return auth.User{}, auth.ErrAccessDenied
+		return auth.User{}, fmt.Errorf(
+			"%w: user %d has status %q",
+			auth.ErrAccessDenied, user.ID, status,
+		)
 	}
 
 	if savedSubject.Valid && savedSubject.String != subject {
-		return auth.User{}, auth.ErrAccessDenied
+		return auth.User{}, fmt.Errorf(
+			"%w: user %d is bound to a different Google account",
+			auth.ErrAccessDenied, user.ID,
+		)
 	}
 
 	if !savedSubject.Valid {
