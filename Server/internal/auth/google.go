@@ -173,11 +173,11 @@ func (g *GoogleLogin) Complete(
 func (g *GoogleLogin) CurrentUser(
 	ctx context.Context,
 	sessionToken string,
-) (User, error){
+) (User, error) {
 	if len(sessionToken) != 43 {
 		return User{}, ErrUnauthenticated
 	}
-	
+
 	return g.repo.ResolveSession(
 		ctx,
 		sha256.Sum256([]byte(sessionToken)),
@@ -191,15 +191,15 @@ func (g *GoogleLogin) SignOut(
 	if sessionToken == "" {
 		return ErrUnauthenticated
 	}
-	
-	err :=  g.repo.RevokeSession(
+
+	err := g.repo.RevokeSession(
 		ctx,
 		sha256.Sum256([]byte(sessionToken)),
 	)
-	
+
 	if errors.Is(err, ErrUnauthenticated) {
 		return nil
 	}
-	
+
 	return err
 }
