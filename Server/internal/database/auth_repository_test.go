@@ -524,3 +524,46 @@ func TestDatabaseFailuresAreNotRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestDeleteExpiredFlowsKeepsRecentAndActiveFlows(t *testing.T) {
+	db := openTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx := context.Background()
+
+	flows := []auth.LoginFlow{
+		newFlow("old", "browser", -2*time.Hour),
+		newFlow("recent", "browser", -10*time.Hour),
+		newFlow("active", "browser", 5*time.Hour),
+	}
+	for _, flow := range flows {
+		if err := repo.SaveFlow(ctx, flow); err != nil {
+			t.Fatalf("SaveFlow() error: %v", err)
+		}
+	}
+
+	deleted, err := repo.DeleteExpiredFlows(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("DeleteExpiredFlows() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	exists := func(state string) bool {
+		t.Helper()
+		stateHash := hash(state)
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM oauth_login_flows WHERE state_hash = ?", stateHash[:],
+		).Scan(&count); err != nil {
+			t.Fatalf("count flows: %v", err)
+		}
+		return count == 1
+	}
+	if exists("old") {
+		t.Error("flow expired 2h ago was not deleted")
+	}
+	if !exists("recent") || !exists("active") {
+		t.Error("a flow inside the grace period or still active was deleted")
+	}
+}
