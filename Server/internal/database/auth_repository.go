@@ -14,6 +14,10 @@ type AuthRepository struct {
 	db *sql.DB
 }
 
+// flowCleanupBatchSize caps how many rows one DELETE removes, so cleanup never
+// holds locks on oauth_login_flows long enough to stall a user's login.
+var flowCleanupBatchSize = 1000
+
 func NewAuthRepository(db *sql.DB) *AuthRepository {
 	return &AuthRepository{db: db}
 }
@@ -250,4 +254,32 @@ func (r *AuthRepository) RevokeSession(
 		tokenHash[:],
 	)
 	return err
+}
+
+func (r *AuthRepository) DeleteExpiredFlows(
+	ctx context.Context,
+	grace time.Duration,
+) (int64, error) {
+	var total int64
+	for{
+		result, err := r.db.ExecContext(ctx, `DELETE FROM oauth_login_flows
+		where expires_at < UTC_TIMESTAMP(6) - INTERVAL ? second
+		LIMIT ?;`, int64(grace.Seconds()), flowCleanupBatchSize)
+		
+		if err != nil {
+			return total, err
+		}
+		
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return total, err
+		}
+		
+		total += deleted
+		
+		// A short batch means nothing older is left.
+		if deleted < int64(flowCleanupBatchSize) {
+			return total, nil
+		}
+	}
 }
