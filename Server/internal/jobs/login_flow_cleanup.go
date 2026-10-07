@@ -16,10 +16,10 @@ type FlowCleaner interface {
 // LoginFlowCleanup periodically deletes OAuth login flows that can no longer
 // be used, so the table does not grow with every login attempt.
 type LoginFlowCleanup struct {
-	cleaner FlowCleaner
-	logger *zap.Logger
+	cleaner  FlowCleaner
+	logger   *zap.Logger
 	interval time.Duration
-	grace time.Duration
+	grace    time.Duration
 }
 
 func NewLoginFlowCleanup(
@@ -28,10 +28,10 @@ func NewLoginFlowCleanup(
 	interval, grace time.Duration,
 ) *LoginFlowCleanup {
 	return &LoginFlowCleanup{
-		cleaner: cleaner,
-		logger: logger,
+		cleaner:  cleaner,
+		logger:   logger,
 		interval: interval,
-		grace: grace,
+		grace:    grace,
 	}
 }
 
@@ -40,13 +40,13 @@ func NewLoginFlowCleanup(
 func (r *LoginFlowCleanup) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
-	
+
 	r.runOnce(ctx)
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return
-		case <- ticker.C:
+		case <-ticker.C:
 			r.runOnce(ctx)
 		}
 	}
@@ -55,17 +55,17 @@ func (r *LoginFlowCleanup) Run(ctx context.Context) {
 func (r *LoginFlowCleanup) runOnce(ctx context.Context) {
 	deleted, err := r.cleaner.DeleteExpiredFlows(ctx, r.grace)
 	if err != nil {
+		// Cancellation during shutdown is expected, not a failure.
 		if ctx.Err() != nil {
 			return
 		}
-		
+		// A failed run is only logged: the next tick retries, and expired
+		// flows are already rejected by ConsumeFlow, so nothing is unsafe.
 		r.logger.Error("Login flow cleanup failed", zap.Error(err))
 		return
 	}
-	
+
 	if deleted > 0 {
 		r.logger.Info("Deleted Expired login flows", zap.Int64("Deleted", deleted))
 	}
 }
-
-
