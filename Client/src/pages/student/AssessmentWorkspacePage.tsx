@@ -1,411 +1,294 @@
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
-  Flag,
-  Play,
-  RotateCcw,
-  Server,
-  Square,
-  Target,
-} from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button } from "../../components/ui/Button";
-import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
-import { ErrorState, LoadingSkeleton } from "../../components/ui/Feedback";
-import { ProgressBar } from "../../components/ui/ProgressBar";
-import { StatusBadge } from "../../components/ui/StatusBadge";
-import { useToast } from "../../components/ui/Toast";
-import { formatDateTime, lifecycleTone } from "../../lib/format";
-import { platformRepository } from "../../services/repositories";
-import type {
-  AssessmentDefinition,
-  StudentAssessment,
-} from "../../types/domain";
+import { AlertTriangle, ArrowLeft, Check, Clock3, Download, Flag, Network, Server } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Button } from '../../components/ui/Button'
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
+import { ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
+import { StatusBadge } from '../../components/ui/StatusBadge'
+import { useToast } from '../../components/ui/Toast'
+import { useNow, usePolling } from '../../hooks/usePolling'
+import { attemptOutcome, formatCountdown, labLabel, poolName, remainingMs, serverOffset } from '../../lib/assessment'
+import { formatDateTime } from '../../lib/format'
+import { ApiError, errorMessage } from '../../services/api'
+import { studentApi } from '../../services/assessments'
+import type { AttemptView, DealtQuestion, FlagSlot, LabView } from '../../types/assessment'
 
 export function AssessmentWorkspacePage() {
-  const { assessmentId } = useParams();
-  const navigate = useNavigate();
-  const { notify } = useToast();
-  const [attempt, setAttempt] = useState<StudentAssessment | null>(null);
-  const [definition, setDefinition] = useState<AssessmentDefinition | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [draft, setDraft] = useState("");
-  const [feedback, setFeedback] = useState<Record<string, string>>({});
-  const [finishOpen, setFinishOpen] = useState(false);
+  const attemptId = Number(useParams().attemptId)
+  const { notify } = useToast()
+  const load = useMemo(() => () => studentApi.attempt(attemptId), [attemptId])
+  // Polling picks up the lab becoming ready and an administrator ending
+  // or revoking the attempt.
+  const { data: attempt, error, loading, refresh } = usePolling(load, 8000)
+  const now = useNow()
+  const [finishOpen, setFinishOpen] = useState(false)
+  // Stable, because the dialog refocuses whenever its handler changes and
+  // the countdown re-renders this page every second.
+  const cancelFinish = useCallback(() => setFinishOpen(false), [])
+
+  const offset = useMemo(() => (attempt ? serverOffset(attempt.serverTime) : 0), [attempt])
+  const remaining = attempt ? remainingMs(attempt.deadlineAt, offset, now) : 0
+  const inProgress = attempt?.status === 'in_progress'
+
+  // At zero the server's expiry job scores the attempt within seconds.
+  const expiredRefresh = useRef(false)
   useEffect(() => {
-    Promise.all([
-      platformRepository.listStudentAssessments(),
-      platformRepository.listAssessmentDefinitions(),
-    ])
-      .then(([attempts, definitions]) => {
-        const found = attempts.find((item) => item.id === assessmentId);
-        if (!found) throw new Error("Attempt not found");
-        setAttempt(found);
-        setDefinition(
-          definitions.find((item) => item.id === found.definitionId) ?? null,
-        );
-      })
-      .catch(() => setError("This assessment record could not be loaded."))
-      .finally(() => setLoading(false));
-  }, [assessmentId]);
-  const questions = definition?.questions ?? [];
-  const question = questions[questionIndex];
-  const answered = Object.keys(attempt?.answers ?? {}).length;
-  const progress = questions.length
-    ? Math.round((answered / questions.length) * 100)
-    : (attempt?.progress ?? 0);
-  const timer = useMemo(
-    () =>
-      `${String(Math.floor((attempt?.duration ?? 0) / 60)).padStart(2, "0")}:${String((attempt?.duration ?? 0) % 60).padStart(2, "0")}:00`,
-    [attempt?.duration],
-  );
-  if (loading) return <LoadingSkeleton rows={6} />;
-  if (error || !attempt)
-    return <ErrorState message={error || "Assessment not found."} />;
-  if (attempt.status !== "Active")
-    return (
-      <div className="space-y-5">
-        <Link
-          to="/student/assessments"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-secondary hover:text-primary"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to assessments
-        </Link>
-        <section className="surface p-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge tone={lifecycleTone(attempt.status)}>
-              {attempt.status}
-            </StatusBadge>
-            <span className="text-sm text-secondary">{attempt.level}</span>
-          </div>
-          <h2 className="page-heading mt-4">{attempt.name}</h2>
-          <dl className="mt-6 grid gap-4 sm:grid-cols-3">
-            <div>
-              <dt className="text-sm text-secondary">Scheduled</dt>
-              <dd className="mt-1 font-medium">
-                {formatDateTime(attempt.scheduledAt)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-secondary">Duration</dt>
-              <dd className="mt-1 font-medium">{attempt.duration} minutes</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-secondary">Attempt</dt>
-              <dd className="mt-1 font-medium">
-                {attempt.attempt || "Not started"}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-6 rounded-lg bg-app p-4 text-sm text-secondary">
-            {attempt.eligibility}
-          </p>
-        </section>
-      </div>
-    );
-  const setEnvironment = async (
-    state: StudentAssessment["environmentState"],
-  ) => {
-    const updated = await platformRepository.updateStudentAssessment(
-      attempt.id,
-      { environmentState: state },
-    );
-    setAttempt(updated);
-    notify(
-      `Lab environment ${state === "Running" ? "started" : "stopped"} (simulated).`,
-    );
-  };
-  const submit = async () => {
-    if (!question || !draft.trim()) {
-      setFeedback((value) => ({
-        ...value,
-        [question?.id ?? ""]: "Enter an answer before submitting.",
-      }));
-      return;
+    if (inProgress && remaining === 0 && !expiredRefresh.current) {
+      expiredRefresh.current = true
+      window.setTimeout(() => void refresh(), 6000)
     }
-    const correct =
-      draft.trim().toLowerCase() === question.expectedAnswer.toLowerCase();
-    const answers = { ...(attempt.answers ?? {}), [question.id]: draft.trim() };
-    const updated = await platformRepository.updateStudentAssessment(
-      attempt.id,
-      {
-        answers,
-        progress: Math.round(
-          (Object.keys(answers).length / questions.length) * 100,
-        ),
-      },
-    );
-    setAttempt(updated);
-    setFeedback((value) => ({
-      ...value,
-      [question.id]: correct
-        ? "Accepted in this mock assessment."
-        : "Submitted. Review the prompt and try again.",
-    }));
-    notify("Answer submitted.");
-  };
+  }, [inProgress, remaining, refresh])
+
+  if (!Number.isInteger(attemptId) || attemptId <= 0) return <ErrorState message="This attempt does not exist." />
+  if (loading) return <LoadingSkeleton rows={6} />
+  if (!attempt) return <ErrorState message={error || 'This attempt could not be loaded.'} onRetry={refresh} />
+  if (!inProgress) return <AttemptResult attempt={attempt} />
+
+  const questions = attempt.questions ?? []
+  const solved = questions.flatMap((q) => q.flags).filter((f) => f.solved).length
+  const totalFlags = questions.flatMap((q) => q.flags).length
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          to="/student/assessments"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-secondary hover:text-primary"
-        >
+        <Link to="/student/assessments" className="inline-flex items-center gap-2 text-sm font-semibold text-secondary hover:text-primary">
           <ArrowLeft className="h-4 w-4" />
-          Back to assessments
+          Assessments
         </Link>
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
           <AlertTriangle className="h-4 w-4" />
-          Authorized college testing only
+          Scan only the target IP you are given
         </div>
       </div>
-      <section className="surface overflow-hidden">
-        <header className="grid gap-4 border-b border-border p-4 sm:p-5 lg:grid-cols-[1fr_auto_auto] lg:items-center">
-          <div>
-            <div className="flex items-center gap-2">
-              <StatusBadge tone="info">Active</StatusBadge>
-              <span className="text-sm text-secondary">{attempt.level}</span>
-            </div>
-            <h2 className="mt-2 text-xl font-semibold text-strong">
-              {attempt.name}
-            </h2>
+
+      <section className="surface grid gap-4 p-4 sm:p-5 lg:grid-cols-[1fr_auto_auto_auto] lg:items-center">
+        <div>
+          <div className="flex items-center gap-2">
+            <StatusBadge tone="info">In progress</StatusBadge>
+            <span className="text-sm text-secondary">{attempt.level}</span>
           </div>
-          <div className="rounded-lg border border-border bg-app px-4 py-2 text-center">
-            <div className="text-xs font-semibold uppercase tracking-wide text-secondary">
-              Time remaining
-            </div>
-            <div className="mt-1 flex items-center justify-center gap-2 font-mono text-lg font-semibold text-strong">
-              <Clock3 className="h-4 w-4 text-primary" />
-              {timer}
-            </div>
+          <h2 className="mt-2 text-xl font-semibold text-strong">{attempt.title}</h2>
+        </div>
+        <Stat label="Score" value={`${attempt.score} / ${attempt.maxScore}`} detail={`Pass ${attempt.passScore}`} />
+        <Stat label="Flags" value={`${solved} / ${totalFlags}`} detail="solved" />
+        <div className={`rounded-lg border px-4 py-2 text-center ${remaining < 5 * 60000 ? 'border-red-200 bg-red-50' : 'border-border bg-app'}`}>
+          <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Time remaining</div>
+          <div className="mt-1 flex items-center justify-center gap-2 font-mono text-lg font-semibold text-strong" aria-live="off">
+            <Clock3 className="h-4 w-4 text-primary" />
+            {formatCountdown(remaining)}
           </div>
-          <Button variant="danger" onClick={() => setFinishOpen(true)}>
-            Finish assessment
-          </Button>
-        </header>
-        <div className="grid lg:grid-cols-[250px_minmax(0,1fr)_290px]">
-          <aside className="border-b border-border bg-app p-4 lg:border-b-0 lg:border-r">
-            <h3 className="text-sm font-semibold text-strong">Questions</h3>
-            <div className="mt-3 grid grid-cols-5 gap-2 lg:grid-cols-3">
-              {questions.map((item, index) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setQuestionIndex(index);
-                    setDraft(attempt.answers?.[item.id] ?? "");
-                  }}
-                  className={`grid h-10 place-items-center rounded-lg border text-sm font-semibold ${index === questionIndex ? "border-primary bg-primary text-white" : attempt.answers?.[item.id] ? "border-emerald-200 bg-emerald-50 text-success" : "border-border bg-white text-secondary hover:bg-subtle"}`}
-                  aria-label={`Question ${index + 1}${attempt.answers?.[item.id] ? ", answered" : ""}`}
-                >
-                  {attempt.answers?.[item.id] ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    index + 1
-                  )}
-                </button>
-              ))}
-            </div>
-            <div className="mt-5">
-              <ProgressBar value={progress} label="Overall completion" />
-            </div>
-          </aside>
-          <main className="min-h-[440px] p-5 sm:p-7">
-            {question ? (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-primary">
-                    Question {questionIndex + 1} of {questions.length}
-                  </p>
-                  <span className="text-sm font-medium text-secondary">
-                    {question.points} points
-                  </span>
-                </div>
-                <h3 className="mt-4 text-lg font-semibold leading-7 text-strong">
-                  {question.prompt}
-                </h3>
-                {question.hint && (
-                  <details className="mt-4 rounded-lg border border-border bg-app p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-strong">
-                      Optional hint
-                    </summary>
-                    <p className="mt-2 text-sm text-secondary">
-                      {question.hint}
-                    </p>
-                  </details>
-                )}
-                <label className="mt-6 block text-sm font-semibold text-strong">
-                  {question.type === "flag"
-                    ? "Flag answer"
-                    : question.type === "multiple-choice"
-                      ? "Choose an answer"
-                      : "Short answer"}
-                  {question.type === "multiple-choice" ? (
-                    <select
-                      className="input mt-2"
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                    >
-                      <option value="">Select one</option>
-                      {question.options?.map((option) => (
-                        <option key={option}>{option}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      className="input mt-2 font-mono"
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder={
-                        question.type === "flag"
-                          ? "CSPACE{...}"
-                          : "Enter your answer"
-                      }
-                    />
-                  )}
-                </label>
-                {feedback[question.id] && (
-                  <p
-                    role="status"
-                    className={`mt-2 text-sm font-medium ${feedback[question.id].startsWith("Accepted") ? "text-success" : "text-warning"}`}
-                  >
-                    {feedback[question.id]}
-                  </p>
-                )}
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                  <Button
-                    variant="secondary"
-                    disabled={questionIndex === 0}
-                    onClick={() => {
-                      const next = questionIndex - 1;
-                      setQuestionIndex(next);
-                      setDraft(attempt.answers?.[questions[next].id] ?? "");
-                    }}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button onClick={submit}>
-                      <Flag className="h-4 w-4" />
-                      Submit answer
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={questionIndex === questions.length - 1}
-                      onClick={() => {
-                        const next = questionIndex + 1;
-                        setQuestionIndex(next);
-                        setDraft(attempt.answers?.[questions[next].id] ?? "");
-                      }}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="grid h-full place-items-center text-center">
-                <div>
-                  <Target className="mx-auto h-8 w-8 text-muted" />
-                  <h3 className="mt-3 font-semibold">
-                    No questions configured
-                  </h3>
-                  <p className="mt-1 text-sm text-secondary">
-                    This mock definition has no questions yet.
-                  </p>
-                </div>
-              </div>
-            )}
-          </main>
-          <aside className="border-t border-border bg-app p-4 lg:border-l lg:border-t-0">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-strong">
-              <Server className="h-4 w-4" />
-              Lab environment
-            </h3>
-            <div className="mt-4 rounded-lg border border-border bg-white p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-secondary">Status</span>
-                <StatusBadge
-                  tone={
-                    attempt.environmentState === "Running"
-                      ? "success"
-                      : "neutral"
-                  }
-                >
-                  {attempt.environmentState ?? "Stopped"}
-                </StatusBadge>
-              </div>
-              <div className="mt-4 border-t border-border pt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                  Assigned target
-                </p>
-                <p className="mt-1 font-mono text-sm font-semibold text-strong">
-                  {attempt.environmentState === "Running"
-                    ? attempt.targetIp
-                    : "Available after start"}
-                </p>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {attempt.environmentState === "Running" ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => setEnvironment("Stopped")}
-                  >
-                    <Square className="h-4 w-4" />
-                    Stop
-                  </Button>
-                ) : (
-                  <Button onClick={() => setEnvironment("Running")}>
-                    <Play className="h-4 w-4" />
-                    Start
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    notify("Environment reset requested (simulated).")
-                  }
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Reset
-                </Button>
-              </div>
-            </div>
-            <p className="mt-3 text-xs leading-5 text-secondary">
-              Provisioning and network isolation are represented for interface
-              testing only. No Docker action is executed.
-            </p>
-          </aside>
         </div>
       </section>
+      {error && <p role="status" className="text-sm text-warning">Connection problem: {error} Retrying…</p>}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        {questions.map((question) => (
+          <QuestionCard
+            key={question.id}
+            attemptId={attempt.id}
+            question={question}
+            lab={question.pool === 'nmap' ? attempt.lab : null}
+            onChange={refresh}
+          />
+        ))}
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="danger" onClick={() => setFinishOpen(true)}>
+          Finish and submit
+        </Button>
+      </div>
+
       <ConfirmDialog
         open={finishOpen}
         title="Finish this assessment?"
-        description={`You have answered ${answered} of ${questions.length} questions. Finishing will stop the mock environment and mark this attempt completed.`}
-        confirmLabel="Finish assessment"
+        description={`You have solved ${solved} of ${totalFlags} flags for ${attempt.score} points. Finishing submits your attempt for scoring and stops your lab. You cannot return to it.`}
+        confirmLabel="Finish and submit"
         tone="danger"
-        onCancel={() => setFinishOpen(false)}
+        onCancel={cancelFinish}
         onConfirm={async () => {
-          await platformRepository.updateStudentAssessment(attempt.id, {
-            status: "Completed",
-            environmentState: "Stopped",
-            progress,
-          });
-          notify("Assessment finished and environment stopped.");
-          navigate("/student/assessments");
+          try {
+            await studentApi.finish(attempt.id)
+            notify('Assessment submitted.')
+          } catch (err) {
+            notify(errorMessage(err), 'error')
+          } finally {
+            setFinishOpen(false)
+            await refresh()
+          }
         }}
       />
     </div>
-  );
+  )
+}
+
+function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-app px-4 py-2 text-center">
+      <div className="text-xs font-semibold uppercase tracking-wide text-secondary">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-strong">{value}</div>
+      <div className="text-xs text-secondary">{detail}</div>
+    </div>
+  )
+}
+
+function QuestionCard({ attemptId, question, lab, onChange }: { attemptId: number; question: DealtQuestion; lab: LabView | null; onChange: () => Promise<void> }) {
+  return (
+    <section className="surface flex flex-col" aria-label={`${poolName[question.pool]} question`}>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-4 sm:p-5">
+        <div className="flex items-center gap-2">
+          {question.pool === 'wireshark' ? <Network className="h-5 w-5 text-primary" /> : <Server className="h-5 w-5 text-primary" />}
+          <h3 className="font-semibold text-strong">{poolName[question.pool]}</h3>
+          <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>
+        </div>
+        <span className="text-sm font-medium text-secondary">
+          {question.score} / {question.points} points
+        </span>
+      </header>
+      <div className="space-y-5 p-4 sm:p-5">
+        <p className="whitespace-pre-line text-sm leading-6 text-strong">{question.prompt}</p>
+
+        {question.pool === 'wireshark' && question.hasPcap && (
+          <a
+            href={studentApi.pcapUrl(attemptId, question.id)}
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border px-3.5 text-sm font-semibold text-strong hover:bg-subtle"
+          >
+            <Download className="h-4 w-4" />
+            Download capture file
+          </a>
+        )}
+        {question.pool === 'nmap' && <TargetPanel lab={lab} />}
+
+        <div className="space-y-3">
+          {question.flags.map((flag, index) => (
+            <FlagForm key={flag.id} attemptId={attemptId} flag={flag} index={index} onChange={onChange} />
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function TargetPanel({ lab }: { lab: LabView | null }) {
+  const state = labLabel(lab?.status)
+  return (
+    <div className="rounded-lg border border-border bg-app p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-secondary">Target</span>
+        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+      </div>
+      <p className="mt-2 font-mono text-lg font-semibold text-strong">
+        {lab?.status === 'running' && lab.ip ? lab.ip : 'Available once the target is running'}
+      </p>
+      {lab?.status === 'failed' && (
+        <p className="mt-2 text-sm text-danger">The target failed to start. Tell the administrator; they can restart it.</p>
+      )}
+    </div>
+  )
+}
+
+function FlagForm({ attemptId, flag, index, onChange }: { attemptId: number; flag: FlagSlot; index: number; onChange: () => Promise<void> }) {
+  const [answer, setAnswer] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null)
+  const inputId = `flag-${flag.id}`
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!answer.trim()) {
+      setFeedback({ ok: false, text: 'Enter an answer first.' })
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await studentApi.submit(attemptId, flag.id, answer)
+      setFeedback(result.correct ? { ok: true, text: `Correct: +${result.points} points.` } : { ok: false, text: 'Incorrect. Try again.' })
+      if (result.correct) setAnswer('')
+      await onChange()
+    } catch (err) {
+      setFeedback({ ok: false, text: errorMessage(err) })
+      if (err instanceof ApiError && (err.code === 'attempt_closed' || err.code === 'already_solved')) await onChange()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className={`rounded-lg border p-3 ${flag.solved ? 'border-emerald-200 bg-emerald-50' : 'border-border'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <label htmlFor={inputId} className="text-sm font-medium text-strong">
+          {index === 0 ? 'Flag' : `Q${index}`}: {flag.prompt}
+        </label>
+        <span className="shrink-0 text-xs font-semibold text-secondary">{flag.points} pts</span>
+      </div>
+      {flag.solved ? (
+        <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-success">
+          <Check className="h-4 w-4" />
+          Solved
+        </p>
+      ) : (
+        <div className="mt-2 flex gap-2">
+          <input
+            id={inputId}
+            className="input font-mono"
+            value={answer}
+            maxLength={256}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Your answer"
+          />
+          <Button type="submit" disabled={busy}>
+            <Flag className="h-4 w-4" />
+            Submit
+          </Button>
+        </div>
+      )}
+      {feedback && !flag.solved && (
+        <p role="status" className={`mt-2 text-sm font-medium ${feedback.ok ? 'text-success' : 'text-warning'}`}>
+          {feedback.text}
+        </p>
+      )}
+      {!flag.solved && flag.submissions > 0 && <p className="mt-1 text-xs text-muted">{flag.submissions} attempt(s) so far</p>}
+    </form>
+  )
+}
+
+function AttemptResult({ attempt }: { attempt: AttemptView }) {
+  const outcome = attemptOutcome(attempt)
+  return (
+    <div className="space-y-5">
+      <Link to="/student/assessments" className="inline-flex items-center gap-2 text-sm font-semibold text-secondary hover:text-primary">
+        <ArrowLeft className="h-4 w-4" />
+        Back to assessments
+      </Link>
+      <section className="surface p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone={outcome.tone}>{outcome.label}</StatusBadge>
+          <span className="text-sm text-secondary">{attempt.level}</span>
+        </div>
+        <h2 className="page-heading mt-4">{attempt.title}</h2>
+        <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+          <div>
+            <dt className="text-sm text-secondary">Score</dt>
+            <dd className="mt-1 text-lg font-semibold">
+              {attempt.status === 'revoked' ? '—' : `${attempt.score} / ${attempt.maxScore}`}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-secondary">Pass mark</dt>
+            <dd className="mt-1 text-lg font-semibold">{attempt.passScore}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-secondary">Ended</dt>
+            <dd className="mt-1 font-medium">{formatDateTime(attempt.endedAt ?? undefined)}</dd>
+          </div>
+        </dl>
+        {attempt.reason && <p className="mt-6 rounded-lg bg-app p-4 text-sm text-secondary">{attempt.reason}</p>}
+        {outcome.label === 'Not passed' || attempt.status === 'revoked' ? (
+          <p className="mt-4 text-sm text-secondary">You can book a new slot after the one-day cooldown.</p>
+        ) : null}
+      </section>
+    </div>
+  )
 }

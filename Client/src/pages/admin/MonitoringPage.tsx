@@ -1,63 +1,437 @@
-import { Activity, Ban, CheckCircle2, Clock3, Eye, Play, ShieldAlert, Square } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Activity, Ban, CheckCircle2, ClipboardCheck, Eye, Play, RotateCcw, Square, UserCheck, UserMinus, Users } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { Button } from '../../components/ui/Button'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
 import { Drawer } from '../../components/ui/Drawer'
 import { DropdownItem, DropdownMenu } from '../../components/ui/DropdownMenu'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
-import { ProgressBar } from '../../components/ui/ProgressBar'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useToast } from '../../components/ui/Toast'
-import { formatDateTime, lifecycleTone } from '../../lib/format'
-import { platformRepository } from '../../services/repositories'
-import type { AssessmentLifecycle, MonitoringSession } from '../../types/domain'
+import { useNow, usePolling } from '../../hooks/usePolling'
+import { attemptOutcome, eligibilityLabel, formatCountdown, labLabel, poolName } from '../../lib/assessment'
+import { formatDateTime } from '../../lib/format'
+import { errorMessage } from '../../services/api'
+import { adminApi } from '../../services/assessments'
+import type { ActionResult, AdminAttempt, AttemptView, LobbyEntry } from '../../types/assessment'
 
-type SensitiveAction = { kind: 'start' | 'revoke' | 'end'; session: MonitoringSession }
+type Tab = 'lobby' | 'live' | 'results'
 
 export function MonitoringPage() {
-  const [sessions, setSessions] = useState<MonitoringSession[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
-  const [assessment, setAssessment] = useState('All')
-  const [level, setLevel] = useState('All')
-  const [booking, setBooking] = useState('All')
-  const [state, setState] = useState<AssessmentLifecycle | 'All'>('All')
-  const [slot, setSlot] = useState('All')
-  const [selected, setSelected] = useState<MonitoringSession | null>(null)
-  const [pending, setPending] = useState<SensitiveAction | null>(null)
-  const { notify } = useToast()
-  const load = () => { setLoading(true); setError(''); platformRepository.listMonitoringSessions().then(setSessions).catch(() => setError('Monitoring records could not be loaded.')).finally(() => setLoading(false)) }
-  useEffect(load, [])
-  const filtered = useMemo(() => sessions.filter((session) => {
-    const haystack = `${session.studentName} ${session.registerNumber} ${session.email}`.toLowerCase()
-    const hour = new Date(session.scheduledAt).getHours()
-    const timeMatches = slot === 'All' || (slot === 'Morning' ? hour < 12 : hour >= 12)
-    return (!search || haystack.includes(search.toLowerCase())) && (assessment === 'All' || session.assessment === assessment) && (level === 'All' || session.level === level) && (booking === 'All' || session.bookingState === booking) && (state === 'All' || session.assessmentState === state) && timeMatches
-  }), [sessions, search, assessment, level, booking, state, slot])
-  const summary = [
-    { label: 'Waiting approval', value: sessions.filter((s) => s.assessmentState === 'Awaiting approval').length, icon: Clock3, tone: 'text-warning bg-amber-50' },
-    { label: 'Active', value: sessions.filter((s) => s.assessmentState === 'Active').length, icon: Activity, tone: 'text-primary bg-blue-50' },
-    { label: 'Completed', value: sessions.filter((s) => s.assessmentState === 'Completed').length, icon: CheckCircle2, tone: 'text-success bg-emerald-50' },
-    { label: 'Revoked', value: sessions.filter((s) => s.assessmentState === 'Revoked').length, icon: ShieldAlert, tone: 'text-danger bg-red-50' },
+  const [tab, setTab] = useState<Tab>('lobby')
+  const tabs: Array<{ id: Tab; label: string; icon: typeof Users }> = [
+    { id: 'lobby', label: 'Test portal', icon: Users },
+    { id: 'live', label: 'Live attempts', icon: Activity },
+    { id: 'results', label: 'Results', icon: ClipboardCheck },
   ]
-  const execute = async (reason?: string) => {
-    if (!pending) return
-    const { kind, session } = pending
-    const patch: Partial<MonitoringSession> = kind === 'start'
-      ? { assessmentState: 'Active', environmentState: 'Running', startedAt: new Date().toISOString(), actionHistory: [...session.actionHistory, 'Assessment approved and started by administrator (simulated)'] }
-      : kind === 'end'
-        ? { assessmentState: 'Completed', environmentState: 'Stopped by admin', endedAt: new Date().toISOString(), timeRemaining: 0, actionHistory: [...session.actionHistory, `Assessment ended by administrator${reason ? `: ${reason}` : ''}`] }
-        : { assessmentState: 'Revoked', environmentState: 'Stopped by admin', endedAt: new Date().toISOString(), timeRemaining: 0, actionHistory: [...session.actionHistory, `Access revoked${reason ? `: ${reason}` : ''}`] }
-    try { const updated = await platformRepository.updateMonitoringSession(session.id, patch); setSessions((records) => records.map((item) => item.id === updated.id ? updated : item)); if (selected?.id === updated.id) setSelected(updated); notify(kind === 'start' ? 'Assessment approved and started.' : kind === 'end' ? 'Active assessment ended.' : 'Assessment access revoked.') }
-    catch { notify('The administrative action failed.', 'error') }
-    finally { setPending(null) }
-  }
-  const actions = (session: MonitoringSession, close?: () => void) => <>{<DropdownItem onClick={() => { setSelected(session); close?.() }}><Eye className="h-4 w-4" />Inspect student session</DropdownItem>}{['Awaiting approval', 'Ready'].includes(session.assessmentState) && <DropdownItem onClick={() => { setPending({ kind: 'start', session }); close?.() }}><Play className="h-4 w-4" />Approve and start</DropdownItem>}{session.assessmentState === 'Active' && <DropdownItem onClick={() => { setPending({ kind: 'end', session }); close?.() }}><Square className="h-4 w-4" />End active assessment</DropdownItem>}{!['Completed', 'Revoked', 'Expired'].includes(session.assessmentState) && <DropdownItem danger onClick={() => { setPending({ kind: 'revoke', session }); close?.() }}><Ban className="h-4 w-4" />Revoke assessment</DropdownItem>}</>
-  return <div className="space-y-6"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="eyebrow">Operational control</p><h2 className="page-heading">Student assessment monitoring</h2><p className="mt-2 max-w-2xl text-secondary">Review scheduled sessions and apply administrative controls to simulated assessment records.</p></div><StatusBadge tone="warning">Mock operational data</StatusBadge></div><div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{summary.map(({ label, value, icon: Icon, tone }) => <div key={label} className="surface flex items-center gap-3 p-4"><div className={`grid h-10 w-10 place-items-center rounded-lg ${tone}`}><Icon className="h-5 w-5" /></div><div><p className="text-2xl font-semibold text-strong">{value}</p><p className="text-sm text-secondary">{label}</p></div></div>)}</div><section className="surface"><div className="border-b border-border p-4 sm:p-5"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.3fr_repeat(5,minmax(130px,0.55fr))]"><SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, register number, or email" /><Filter label="Assessment" value={assessment} onChange={setAssessment} values={Array.from(new Set(sessions.map((s) => s.assessment)))} /><Filter label="Level" value={level} onChange={setLevel} values={['Level 1', 'Level 2']} /><Filter label="Booking state" value={booking} onChange={setBooking} values={['Booked', 'Confirmed', 'Waitlisted']} /><Filter label="Assessment state" value={state} onChange={(value) => setState(value as typeof state)} values={['Awaiting approval', 'Ready', 'Active', 'Completed', 'Revoked']} /><Filter label="Time slot" value={slot} onChange={setSlot} values={['Morning', 'Afternoon']} /></div></div><div className="p-4 sm:p-5">{loading ? <LoadingSkeleton rows={5} /> : error ? <ErrorState message={error} onRetry={load} /> : filtered.length === 0 ? <EmptyState title="No sessions match" description="Adjust the monitoring filters to view other sessions." /> : <><div className="hidden overflow-x-auto xl:block"><table className="w-full border-collapse text-left"><thead><tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted"><th className="pb-3 pr-4">Student</th><th className="px-4 pb-3">Assessment</th><th className="px-4 pb-3">Scheduled</th><th className="px-4 pb-3">Environment</th><th className="px-4 pb-3">State</th><th className="px-4 pb-3">Remaining</th><th className="pb-3 pl-4 text-right">Actions</th></tr></thead><tbody>{filtered.map((session) => <tr key={session.id} className="border-b border-border last:border-0"><td className="py-4 pr-4"><p className="font-semibold text-strong">{session.studentName}</p><p className="mt-0.5 text-sm text-secondary">{session.registerNumber}</p></td><td className="px-4 py-4"><p className="font-medium text-strong">{session.assessment}</p><p className="mt-0.5 text-sm text-secondary">{session.level}</p></td><td className="px-4 py-4 text-sm text-secondary">{formatDateTime(session.scheduledAt)}</td><td className="px-4 py-4"><StatusBadge tone={session.environmentState === 'Running' ? 'success' : 'neutral'}>{session.environmentState}</StatusBadge></td><td className="px-4 py-4"><StatusBadge tone={lifecycleTone(session.assessmentState)}>{session.assessmentState}</StatusBadge></td><td className="px-4 py-4 font-mono text-sm font-semibold">{session.timeRemaining ? `${session.timeRemaining}m` : '—'}</td><td className="py-4 pl-4 text-right"><DropdownMenu>{(close) => actions(session, close)}</DropdownMenu></td></tr>)}</tbody></table></div><div className="space-y-3 xl:hidden">{filtered.map((session) => <article key={session.id} className="rounded-lg border border-border p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-strong">{session.studentName}</p><p className="text-sm text-secondary">{session.registerNumber}</p></div><DropdownMenu>{(close) => actions(session, close)}</DropdownMenu></div><p className="mt-3 font-medium text-strong">{session.assessment}</p><p className="mt-1 text-sm text-secondary">{formatDateTime(session.scheduledAt)}</p><div className="mt-3 flex flex-wrap gap-2"><StatusBadge tone={lifecycleTone(session.assessmentState)}>{session.assessmentState}</StatusBadge><StatusBadge tone={session.environmentState === 'Running' ? 'success' : 'neutral'}>{session.environmentState}</StatusBadge></div></article>)}</div></>}</div></section><Drawer open={Boolean(selected)} title={selected?.studentName ?? 'Student session'} description={selected ? `${selected.registerNumber} · Simulated session record` : undefined} onClose={() => setSelected(null)}>{selected && <SessionDetails session={selected} />}</Drawer><ConfirmDialog open={Boolean(pending)} title={pending?.kind === 'start' ? 'Approve and start assessment?' : pending?.kind === 'end' ? 'End active assessment?' : 'Revoke assessment access?'} description={pending?.kind === 'start' ? 'This will mark the assessment active and start the simulated lab environment.' : pending?.kind === 'end' ? 'The student will no longer be able to submit answers in this mock session.' : 'The student will lose access and the simulated environment will be stopped.'} confirmLabel={pending?.kind === 'start' ? 'Approve and start' : pending?.kind === 'end' ? 'End assessment' : 'Revoke assessment'} tone={pending?.kind === 'start' ? 'primary' : 'danger'} requireReason={pending?.kind !== 'start'} onCancel={() => setPending(null)} onConfirm={execute} /></div>
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="eyebrow">Operational control</p>
+        <h2 className="page-heading">Assessment monitoring</h2>
+        <p className="mt-2 max-w-2xl text-secondary">
+          Take attendance of students in the test portal, start their test, and supervise attempts and labs as they run.
+        </p>
+      </div>
+      <div role="tablist" aria-label="Monitoring views" className="flex gap-1 rounded-lg border border-border bg-white p-1">
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold transition ${tab === id ? 'bg-primary text-white' : 'text-secondary hover:bg-subtle'}`}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'lobby' && <LobbyPanel />}
+      {tab === 'live' && <AttemptsPanel scope="active" />}
+      {tab === 'results' && <AttemptsPanel scope="recent" />}
+    </div>
+  )
 }
 
-function Filter({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange: (value: string) => void }) { return <label><span className="sr-only">{label}</span><select className="input" value={value} onChange={(e) => onChange(e.target.value)}><option value="All">All {label.toLowerCase()}s</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label> }
+// ---- Test portal -----------------------------------------------------------
 
-function SessionDetails({ session }: { session: MonitoringSession }) { return <div className="space-y-6"><section><h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Student identity</h3><dl className="mt-3 grid gap-3 rounded-lg bg-app p-4 sm:grid-cols-2"><Info label="Email" value={session.email} /><Info label="Register number" value={session.registerNumber} /></dl></section><section><h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Booking and assessment</h3><dl className="mt-3 grid gap-3 rounded-lg bg-app p-4 sm:grid-cols-2"><Info label="Assessment" value={session.assessment} /><Info label="Level" value={session.level} /><Info label="Scheduled" value={formatDateTime(session.scheduledAt)} /><Info label="Booking state" value={session.bookingState} /></dl></section><section><h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Environment</h3><div className="mt-3 rounded-lg border border-border p-4"><div className="flex items-center justify-between"><span className="text-sm text-secondary">Environment state</span><StatusBadge tone={session.environmentState === 'Running' ? 'success' : 'neutral'}>{session.environmentState}</StatusBadge></div><dl className="mt-4 grid gap-3 sm:grid-cols-2"><Info label="Started" value={formatDateTime(session.startedAt)} /><Info label="Ended" value={formatDateTime(session.endedAt)} /></dl></div></section><section><h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Progress</h3><div className="mt-3"><ProgressBar value={session.progress} label="Assessment completion" /><p className="mt-2 text-sm text-secondary">{session.submittedAnswers} of {session.totalAnswers} answers submitted</p></div></section><section><h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Administrative action history</h3><ol className="mt-3 space-y-3">{session.actionHistory.map((item, index) => <li key={`${item}-${index}`} className="flex gap-3 text-sm text-secondary"><span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" /><span>{item}</span></li>)}</ol></section></div> }
-function Info({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt><dd className="mt-1 break-words text-sm font-medium text-strong">{value}</dd></div> }
+function LobbyPanel() {
+  const { data, error, loading, refresh } = usePolling(adminApi.lobby, 5000)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
+  const [confirmStart, setConfirmStart] = useState(false)
+  const [results, setResults] = useState<{ title: string; items: ActionResult[] } | null>(null)
+  const { notify } = useToast()
+  // Stable, because the dialog refocuses whenever its handler changes and
+  // this panel re-renders on every poll.
+  const cancelStart = useCallback(() => setConfirmStart(false), [])
+
+  const students = useMemo(() => {
+    const term = search.toLowerCase()
+    return (data ?? []).filter((s) => !term || `${s.name} ${s.email} ${s.registerNumber}`.toLowerCase().includes(term))
+  }, [data, search])
+  const byId = useMemo(() => new Map((data ?? []).map((s) => [s.id, s])), [data])
+  const chosen = [...selected].map((id) => byId.get(id)).filter((s): s is LobbyEntry => Boolean(s))
+  const toMark = chosen.filter((s) => s.online && !s.attendanceMarked && s.eligibility === 'eligible')
+  const toStart = chosen.filter((s) => s.attendanceMarked && s.eligibility === 'eligible')
+
+  const toggle = (id: string) => setSelected((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+
+  const report = (title: string, items: ActionResult[]) => {
+    const failed = items.filter((r) => !r.ok || r.warning)
+    notify(`${title}: ${items.length - items.filter((r) => !r.ok).length} of ${items.length} succeeded.`, failed.length ? 'error' : 'success')
+    setResults(failed.length ? { title, items: failed } : null)
+    setSelected(new Set())
+  }
+
+  const markPresent = async () => {
+    try {
+      report('Attendance', await adminApi.markAttendance(toMark.map((s) => s.id)))
+    } catch (err) {
+      notify(errorMessage(err), 'error')
+    }
+    await refresh()
+  }
+
+  const withdraw = async (student: LobbyEntry) => {
+    try {
+      await adminApi.cancelAttendance(student.id)
+      notify(`Attendance withdrawn for ${student.name}.`)
+    } catch (err) {
+      notify(errorMessage(err), 'error')
+    }
+    await refresh()
+  }
+
+  if (loading) return <LoadingSkeleton rows={4} />
+  if (!data) return <ErrorState message={error || 'The test portal could not be loaded.'} onRetry={refresh} />
+
+  const online = data.filter((s) => s.online).length
+  const marked = data.filter((s) => s.attendanceMarked).length
+
+  return (
+    <section className="surface">
+      <div className="grid gap-3 border-b border-border p-4 sm:p-5 lg:grid-cols-[1fr_auto]">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
+          <span><strong className="text-strong">{online}</strong> in portal</span>
+          <span><strong className="text-strong">{marked}</strong> attendance taken</span>
+          {error && <span className="text-warning">Refresh failed: {error}</span>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setSelected(new Set(data.filter((s) => s.online || s.attendanceMarked).map((s) => s.id)))}>
+            Select all
+          </Button>
+          <Button variant="secondary" disabled={toMark.length === 0} onClick={markPresent}>
+            <UserCheck className="h-4 w-4" />
+            Mark present ({toMark.length})
+          </Button>
+          <Button disabled={toStart.length === 0} onClick={() => setConfirmStart(true)}>
+            <Play className="h-4 w-4" />
+            Start test ({toStart.length})
+          </Button>
+        </div>
+        <div className="lg:col-span-2">
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, email, or register number" />
+        </div>
+      </div>
+
+      {results && (
+        <div role="alert" className="border-b border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p className="font-semibold">{results.title}: some students need attention</p>
+          <ul className="mt-2 space-y-1">
+            {results.items.map((r) => (
+              <li key={r.studentId}>
+                {byId.get(r.studentId)?.name ?? r.studentId}: {r.error ?? r.warning}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="p-4 sm:p-5">
+        {students.length === 0 ? (
+          <EmptyState title="Nobody is in the test portal" description="Students appear here when they open the test portal from their assessments page." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="w-10 pb-3"><span className="sr-only">Select</span></th>
+                  <th className="pb-3 font-semibold">Student</th>
+                  <th className="pb-3 font-semibold">Level</th>
+                  <th className="pb-3 font-semibold">Portal</th>
+                  <th className="pb-3 font-semibold">Attendance</th>
+                  <th className="pb-3 font-semibold">Status</th>
+                  <th className="pb-3"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {students.map((student) => {
+                  const eligibility = eligibilityLabel(student.eligibility)
+                  return (
+                    <tr key={student.id}>
+                      <td className="py-3">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={selected.has(student.id)}
+                          onChange={() => toggle(student.id)}
+                          aria-label={`Select ${student.name}`}
+                        />
+                      </td>
+                      <td className="py-3">
+                        <p className="font-medium text-strong">{student.name}</p>
+                        <p className="text-xs text-secondary">{student.registerNumber || student.email}</p>
+                      </td>
+                      <td className="py-3 text-secondary">{student.level || '—'}</td>
+                      <td className="py-3">
+                        <StatusBadge tone={student.online ? 'success' : 'neutral'}>{student.online ? 'Online' : 'Offline'}</StatusBadge>
+                      </td>
+                      <td className="py-3">
+                        {student.attendanceMarked ? <StatusBadge tone="info">Present</StatusBadge> : <span className="text-secondary">—</span>}
+                      </td>
+                      <td className="py-3"><StatusBadge tone={eligibility.tone}>{eligibility.label}</StatusBadge></td>
+                      <td className="py-3 text-right">
+                        {student.attendanceMarked && (
+                          <Button variant="ghost" onClick={() => withdraw(student)} aria-label={`Withdraw attendance for ${student.name}`}>
+                            <UserMinus className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmStart}
+        title="Start the test?"
+        description={`${toStart.length} student(s) will each be dealt one Wireshark and one Nmap question, their lab will start, and their one-hour timer begins now.`}
+        confirmLabel="Start test"
+        onCancel={cancelStart}
+        onConfirm={async () => {
+          try {
+            report('Start', await adminApi.start(toStart.map((s) => s.id)))
+          } catch (err) {
+            notify(errorMessage(err), 'error')
+          } finally {
+            setConfirmStart(false)
+            await refresh()
+          }
+        }}
+      />
+    </section>
+  )
+}
+
+// ---- Attempts --------------------------------------------------------------
+
+type PendingAction = { kind: 'end' | 'revoke' | 'lab'; attempt: AdminAttempt }
+
+function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
+  const load = useMemo(() => () => adminApi.attempts(scope), [scope])
+  const { data, error, loading, refresh } = usePolling(load, scope === 'active' ? 5000 : 15000)
+  const [search, setSearch] = useState('')
+  const [pending, setPending] = useState<PendingAction | null>(null)
+  const [inspected, setInspected] = useState<AttemptView | null>(null)
+  const now = useNow()
+  const { notify } = useToast()
+  // Stable, because dialogs refocus whenever their handler changes and the
+  // countdown re-renders this panel every second.
+  const cancelPending = useCallback(() => setPending(null), [])
+  const closeInspected = useCallback(() => setInspected(null), [])
+
+  const attempts = useMemo(() => {
+    const term = search.toLowerCase()
+    return (data ?? []).filter((a) => !term || `${a.student.name} ${a.student.email} ${a.student.registerNumber}`.toLowerCase().includes(term))
+  }, [data, search])
+
+  const inspect = async (attempt: AdminAttempt) => {
+    try {
+      setInspected(await adminApi.attempt(attempt.id))
+    } catch (err) {
+      notify(errorMessage(err), 'error')
+    }
+  }
+
+  const execute = async (reason?: string) => {
+    if (!pending) return
+    const { kind, attempt } = pending
+    try {
+      if (kind === 'end') await adminApi.end(attempt.id)
+      if (kind === 'revoke') await adminApi.revoke(attempt.id, reason ?? '')
+      if (kind === 'lab') await adminApi.restartLab(attempt.id)
+      notify(kind === 'end' ? 'Attempt ended and scored.' : kind === 'revoke' ? 'Attempt revoked.' : 'Lab restart queued.')
+    } catch (err) {
+      notify(errorMessage(err), 'error')
+    } finally {
+      setPending(null)
+      await refresh()
+    }
+  }
+
+  if (loading) return <LoadingSkeleton rows={4} />
+  if (!data) return <ErrorState message={error || 'Attempts could not be loaded.'} onRetry={refresh} />
+
+  return (
+    <section className="surface">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border p-4 sm:p-5">
+        <div className="min-w-60 flex-1">
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search students" />
+        </div>
+        <span className="text-sm text-secondary">{attempts.length} attempt(s)</span>
+        {error && <span className="text-sm text-warning">Refresh failed: {error}</span>}
+      </div>
+      <div className="p-4 sm:p-5">
+        {attempts.length === 0 ? (
+          <EmptyState
+            title={scope === 'active' ? 'No attempts in progress' : 'No attempts yet'}
+            description={scope === 'active' ? 'Started tests appear here.' : 'Finished attempts appear here.'}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="pb-3 font-semibold">Student</th>
+                  <th className="pb-3 font-semibold">Questions</th>
+                  <th className="pb-3 font-semibold">Lab</th>
+                  <th className="pb-3 font-semibold">Score</th>
+                  <th className="pb-3 font-semibold">{scope === 'active' ? 'Time left' : 'Result'}</th>
+                  <th className="pb-3 font-semibold">{scope === 'active' ? 'Started' : 'Ended'}</th>
+                  <th className="pb-3"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {attempts.map((attempt) => {
+                  const lab = labLabel(attempt.lab?.status)
+                  const outcome = attemptOutcome(attempt)
+                  const active = attempt.status === 'in_progress'
+                  const left = attempt.deadlineAt ? Math.max(0, new Date(attempt.deadlineAt).getTime() - now) : 0
+                  return (
+                    <tr key={attempt.id}>
+                      <td className="py-3">
+                        <p className="font-medium text-strong">{attempt.student.name}</p>
+                        <p className="text-xs text-secondary">{attempt.student.registerNumber || attempt.student.email} · {attempt.level}</p>
+                      </td>
+                      <td className="py-3 text-secondary">
+                        {attempt.questions.map((q) => (
+                          <p key={q.id}>
+                            {poolName[q.pool]} <span className="font-mono text-xs">{q.code}</span> · {q.score}/{q.points}
+                          </p>
+                        ))}
+                      </td>
+                      <td className="py-3">
+                        <StatusBadge tone={lab.tone}>{lab.label}</StatusBadge>
+                        {attempt.lab?.ip && <p className="mt-1 font-mono text-xs text-secondary">{attempt.lab.ip}</p>}
+                      </td>
+                      <td className="py-3 font-medium text-strong">{attempt.status === 'revoked' ? '—' : `${attempt.score} / ${attempt.maxScore}`}</td>
+                      <td className="py-3">
+                        {active ? (
+                          <span className={`font-mono ${left < 5 * 60000 ? 'text-danger' : 'text-strong'}`}>{formatCountdown(left)}</span>
+                        ) : (
+                          <>
+                            <StatusBadge tone={outcome.tone}>{outcome.label}</StatusBadge>
+                            {attempt.reason && <p className="mt-1 text-xs text-secondary">{attempt.reason}</p>}
+                          </>
+                        )}
+                      </td>
+                      <td className="py-3 text-secondary">{formatDateTime((active ? attempt.startedAt : attempt.endedAt) ?? undefined)}</td>
+                      <td className="py-3 text-right">
+                        <DropdownMenu label="Open actions">
+                          {(close) => (
+                            <>
+                              <DropdownItem onClick={() => { void inspect(attempt); close() }}><Eye className="h-4 w-4" />Inspect attempt</DropdownItem>
+                              {active && <DropdownItem onClick={() => { setPending({ kind: 'lab', attempt }); close() }}><RotateCcw className="h-4 w-4" />Restart lab</DropdownItem>}
+                              {active && <DropdownItem onClick={() => { setPending({ kind: 'end', attempt }); close() }}><Square className="h-4 w-4" />End and score</DropdownItem>}
+                              {active && <DropdownItem danger onClick={() => { setPending({ kind: 'revoke', attempt }); close() }}><Ban className="h-4 w-4" />Revoke attempt</DropdownItem>}
+                            </>
+                          )}
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={Boolean(pending)}
+        title={pending?.kind === 'end' ? 'End this attempt?' : pending?.kind === 'revoke' ? 'Revoke this attempt?' : 'Restart the lab?'}
+        description={
+          pending?.kind === 'end'
+            ? `${pending.attempt.student.name}'s attempt will be scored now with ${pending.attempt.score} points and the lab stopped.`
+            : pending?.kind === 'revoke'
+              ? `${pending.attempt.student.name}'s attempt will be closed without a score and counts as not passed. The reason is recorded and shown to the student.`
+              : `A fresh lab will be queued for ${pending?.attempt.student.name ?? ''}. Only possible when the current lab has failed or stopped.`
+        }
+        confirmLabel={pending?.kind === 'end' ? 'End and score' : pending?.kind === 'revoke' ? 'Revoke attempt' : 'Restart lab'}
+        tone={pending?.kind === 'lab' ? 'primary' : 'danger'}
+        reasonRequired={pending?.kind === 'revoke'}
+        onCancel={cancelPending}
+        onConfirm={execute}
+      />
+
+      <Drawer open={Boolean(inspected)} title={inspected ? `Attempt #${inspected.id}` : ''} onClose={closeInspected}>
+        {inspected && <AttemptDetails attempt={inspected} />}
+      </Drawer>
+    </section>
+  )
+}
+
+function AttemptDetails({ attempt }: { attempt: AttemptView }) {
+  const outcome = attemptOutcome(attempt)
+  const lab = labLabel(attempt.lab?.status)
+  return (
+    <div className="space-y-5 text-sm">
+      <dl className="grid grid-cols-2 gap-3 rounded-lg bg-app p-4">
+        <Detail label="Status" value={<StatusBadge tone={outcome.tone}>{outcome.label}</StatusBadge>} />
+        <Detail label="Score" value={`${attempt.score} / ${attempt.maxScore} (pass ${attempt.passScore})`} />
+        <Detail label="Started" value={formatDateTime(attempt.startedAt ?? undefined)} />
+        <Detail label="Deadline" value={formatDateTime(attempt.deadlineAt ?? undefined)} />
+        <Detail label="Lab" value={<><StatusBadge tone={lab.tone}>{lab.label}</StatusBadge>{attempt.lab?.ip && <span className="ml-2 font-mono">{attempt.lab.ip}</span>}</>} />
+        <Detail label="Ended" value={formatDateTime(attempt.endedAt ?? undefined)} />
+      </dl>
+      {attempt.reason && <p className="rounded-lg bg-app p-3 text-secondary">{attempt.reason}</p>}
+      {(attempt.questions ?? []).map((q) => (
+        <section key={q.id} className="rounded-lg border border-border p-4">
+          <h3 className="font-semibold text-strong">
+            {poolName[q.pool]} · <span className="font-mono text-xs">{q.code}</span> · {q.difficulty}
+          </h3>
+          <ul className="mt-3 space-y-2">
+            {q.flags.map((f) => (
+              <li key={f.id} className="flex items-start justify-between gap-3">
+                <span className="text-secondary">{f.prompt}</span>
+                <span className="shrink-0">
+                  {f.solved ? <CheckCircle2 className="inline h-4 w-4 text-success" /> : <span className="text-muted">{f.submissions} tries</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function Detail({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt>
+      <dd className="mt-1 font-medium text-strong">{value}</dd>
+    </div>
+  )
+}

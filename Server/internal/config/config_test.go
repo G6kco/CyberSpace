@@ -170,9 +170,34 @@ func setBaseEnvironment(t *testing.T) {
 		"GOOGLE_CALL_BACK":      "https://api.example.test/api/v1/auth/google/callback",
 		"GOOGLE_ALLOWED_DOMAIN": "example.test",
 		"DOCKER_HOST":           "",
+		"ANSWER_HMAC_KEY":       strings.Repeat("k", 32),
+		"PCAP_DIR":              "",
 	}
 
 	for key, value := range values {
 		t.Setenv(key, value)
+	}
+}
+
+func TestLoadValidatesAnswerKeyLength(t *testing.T) {
+	setBaseEnvironment(t)
+
+	t.Setenv("ANSWER_HMAC_KEY", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ANSWER_HMAC_KEY") {
+		t.Fatalf("Load() without ANSWER_HMAC_KEY error = %v; want ANSWER_HMAC_KEY error", err)
+	}
+
+	t.Setenv("ANSWER_HMAC_KEY", strings.Repeat("k", 31))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ANSWER_HMAC_KEY") {
+		t.Fatalf("Load() with a short key error = %v; want ANSWER_HMAC_KEY error", err)
+	}
+
+	t.Setenv("ANSWER_HMAC_KEY", strings.Repeat("k", 32))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() with a 32-byte key error = %v", err)
+	}
+	if cfg.AnswerKey != strings.Repeat("k", 32) {
+		t.Fatalf("AnswerKey = %q", cfg.AnswerKey)
 	}
 }

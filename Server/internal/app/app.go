@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/G6kco/CyberSpace/internal/assessments"
 	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/G6kco/CyberSpace/internal/config"
 	"go.uber.org/zap"
@@ -23,6 +24,8 @@ type App struct {
 	DB     Database
 	Logger *zap.Logger
 	Auth   *auth.GoogleLogin
+	// Assessments is set by main once the answer key and lab engine exist.
+	Assessments *assessments.Service
 }
 
 // New creates a dependency container and rejects incomplete startup wiring.

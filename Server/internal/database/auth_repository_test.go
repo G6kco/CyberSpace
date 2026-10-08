@@ -6,94 +6,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/G6kco/CyberSpace/internal/auth"
-	"github.com/G6kco/CyberSpace/migrations"
-	"github.com/go-sql-driver/mysql"
-	migrate "github.com/golang-migrate/migrate/v4"
-	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/G6kco/CyberSpace/internal/database/dbtest"
 )
 
-// testDatabaseEnv names a disposable MySQL database for the repository
-// integration tests. Its tables are emptied by every test, so the database
-// name must end in "_test".
-const testDatabaseEnv = "CYBERSPACE_TEST_DATABASE_URL"
-
-var (
-	migrateOnce  sync.Once
-	migrateError error
-)
-
+// openTestDatabase returns the shared test database, emptied; it skips the
+// test unless dbtest.EnvVar is set.
 func openTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
-
-	dsn := os.Getenv(testDatabaseEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a disposable *_test MySQL database to run repository tests", testDatabaseEnv)
-	}
-
-	dsnConfig, err := mysql.ParseDSN(dsn)
-	if err != nil {
-		t.Fatalf("parse %s: %v", testDatabaseEnv, err)
-	}
-	if !strings.HasSuffix(dsnConfig.DBName, "_test") {
-		t.Fatalf("refusing to empty database %q: %s must name a database ending in _test", dsnConfig.DBName, testDatabaseEnv)
-	}
-
-	migrateOnce.Do(func() { migrateError = migrateUp(*dsnConfig) })
-	if migrateError != nil {
-		t.Fatalf("migrate test database: %v", migrateError)
-	}
-
-	db, err := NewMySQL(dsn)
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	// Children first, because auth_sessions references users.
-	for _, table := range []string{"auth_sessions", "oauth_login_flows", "users"} {
-		if _, err := db.Exec("DELETE FROM " + table); err != nil {
-			t.Fatalf("empty %s: %v", table, err)
-		}
-	}
-	return db
-}
-
-func migrateUp(dsnConfig mysql.Config) error {
-	dsnConfig.MultiStatements = true
-	db, err := NewMySQL(dsnConfig.FormatDSN())
-	if err != nil {
-		return err
-	}
-
-	source, err := iofs.New(migrations.FS, ".")
-	if err != nil {
-		_ = db.Close()
-		return err
-	}
-	driver, err := migratemysql.WithInstance(db, &migratemysql.Config{})
-	if err != nil {
-		_ = db.Close()
-		return err
-	}
-	migrator, err := migrate.NewWithInstance("iofs", source, "mysql", driver)
-	if err != nil {
-		_ = driver.Close()
-		return err
-	}
-	defer migrator.Close()
-
-	if err := migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return err
-	}
-	return nil
+	return dbtest.Open(t)
 }
 
 var userSequence int

@@ -9,6 +9,11 @@ import (
 // NewRouter builds the HTTP transport with dependencies supplied explicitly.
 func NewRouter(application *app.App) *gin.Engine {
 	router := gin.New()
+	// The API is served directly, not behind a proxy, so the client IP
+	// recorded in audit logs comes from the connection and cannot be
+	// spoofed with X-Forwarded-For. Configure trusted proxies here if one
+	// is ever placed in front.
+	_ = router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery())
 	router.Use(middleware.InitCORS(application.Config.AllowedOrigins))
 
@@ -34,6 +39,15 @@ func NewRouter(application *app.App) *gin.Engine {
 		protected.Use(handler.requireSession())
 		protected.GET("/me", handler.me)
 		protected.DELETE("/auth/session", handler.logout)
+
+		if application.Assessments != nil {
+			guarded := protected.Group("", requireOrigin(application.Config.FrontendURL))
+			registerAssessmentRoutes(guarded, &assessmentHandler{
+				service: application.Assessments,
+				logger:  application.Logger,
+			})
+			application.Logger.Info("Assessment routes registered")
+		}
 
 		application.Logger.Info("Authentication routes registered")
 	}

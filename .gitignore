@@ -35,3 +35,9 @@ bin/
 *.test
 coverage.out
 cover.out
+
+# Assessment material: captures contain flags; the reference dump contains
+# every flag and real student records
+Server/storage/pcaps/*
+!Server/storage/pcaps/README.md
+Reference/
