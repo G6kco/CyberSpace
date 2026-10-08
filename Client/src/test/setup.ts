@@ -1,11 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { answer, resetApi } from './api'
 import { clearSession, currentSession } from './session'
 
 afterEach(() => {
   cleanup()
   clearSession()
+  resetApi()
 })
 
 // Stub the API rather than the auth service, so services/auth.ts runs for real
@@ -33,6 +35,11 @@ vi.stubGlobal(
       clearSession()
       return new Response(null, { status: 204 })
     }
+
+    const { pathname, search } = new URL(url)
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+    const stubbed = answer(init?.method ?? 'GET', pathname + search, body)
+    if (stubbed) return stubbed
 
     return json({ code: 'not_found' }, 404)
   }),

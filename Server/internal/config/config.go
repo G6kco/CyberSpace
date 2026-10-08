@@ -16,6 +16,10 @@ const (
 	defaultAppEnv     = "development"
 	defaultServerHost = "0.0.0.0"
 	defaultServerPort = 8080
+	// defaultPcapDir is relative to the directory the API is started from.
+	defaultPcapDir = "storage/pcaps"
+	// minAnswerKeyLength matches evaluation.MinKeyLength.
+	minAnswerKeyLength = 32
 	// defaultCallBackURL = "http://localhost:8080/auth/google/callback"
 )
 
@@ -32,6 +36,11 @@ type Config struct {
 	GoogleCallback      string
 	DockerHost          string
 	GoogleAllowedDomain string
+	// AnswerKey keys the HMACs that expected answers are stored as. Changing
+	// it after questions are imported makes every stored answer unmatchable.
+	AnswerKey string
+	// PcapDir holds the Wireshark capture files served to students.
+	PcapDir string
 }
 
 // Load reads the optional .env file and the process environment, applies safe
@@ -81,6 +90,8 @@ func loadEnvironment() (*Config, error) {
 		GoogleAllowedDomain: strings.ToLower(
 			strings.TrimSpace(os.Getenv("GOOGLE_ALLOWED_DOMAIN")),
 		),
+		AnswerKey: os.Getenv("ANSWER_HMAC_KEY"),
+		PcapDir:   strings.TrimSpace(os.Getenv("PCAP_DIR")),
 	}, nil
 }
 
@@ -93,6 +104,9 @@ func (cfg *Config) applyDefaults() {
 	}
 	if cfg.ServerPort == 0 {
 		cfg.ServerPort = defaultServerPort
+	}
+	if cfg.PcapDir == "" {
+		cfg.PcapDir = defaultPcapDir
 	}
 
 	cfg.AppEnv = strings.ToLower(cfg.AppEnv)
@@ -150,6 +164,10 @@ func (cfg *Config) validate() error {
 
 	if cfg.AppEnv == "production" && (callback.Scheme != "https" || frontend.Scheme != "https") {
 		return errors.New("prodcution URLs must be HTTPS")
+	}
+
+	if len(cfg.AnswerKey) < minAnswerKeyLength {
+		return fmt.Errorf("ANSWER_HMAC_KEY must be at least %d bytes", minAnswerKeyLength)
 	}
 
 	for _, origin := range cfg.AllowedOrigins {

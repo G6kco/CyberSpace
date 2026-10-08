@@ -7,10 +7,10 @@ import { LearningPage } from '../pages/student/LearningPage'
 import { MaterialDetailPage } from '../pages/student/MaterialDetailPage'
 import { AssessmentsPage } from '../pages/student/AssessmentsPage'
 import { AssessmentWorkspacePage } from '../pages/student/AssessmentWorkspacePage'
+import { LobbyPage } from '../pages/student/LobbyPage'
 import { MonitoringPage } from '../pages/admin/MonitoringPage'
 import { StudentsPage } from '../pages/admin/StudentsPage'
 import { AssessmentManagementPage } from '../pages/admin/AssessmentManagementPage'
-import { AssessmentEditorPage } from '../pages/admin/AssessmentEditorPage'
 import { roleLanding } from './navigation'
 import type { ReactNode } from 'react'
 import type { Role } from '../types/domain'
@@ -52,14 +52,12 @@ export function AppRoutes() {
       <Route path="student/learning" element={<RequireRole role="student"><LearningPage /></RequireRole>} />
       <Route path="student/learning/:materialId" element={<RequireRole role="student"><MaterialDetailPage /></RequireRole>} />
       <Route path="student/assessments" element={<RequireRole role="student"><AssessmentsPage /></RequireRole>} />
-      <Route path="student/assessments/:assessmentId" element={<RequireRole role="student"><AssessmentWorkspacePage /></RequireRole>} />
+      <Route path="student/lobby" element={<RequireRole role="student"><LobbyPage /></RequireRole>} />
+      <Route path="student/attempts/:attemptId" element={<RequireRole role="student"><AssessmentWorkspacePage /></RequireRole>} />
       <Route path="admin" element={<RequireRole role="admin"><Navigate to="/admin/monitoring" replace /></RequireRole>} />
       <Route path="admin/monitoring" element={<RequireRole role="admin"><MonitoringPage /></RequireRole>} />
       <Route path="admin/assessments" element={<RequireRole role="admin"><AssessmentManagementPage /></RequireRole>} />
-      <Route path="admin/assessments/new" element={<RequireRole role="admin"><AssessmentEditorPage /></RequireRole>} />
-      <Route path="admin/assessments/:assessmentId/edit" element={<RequireRole role="admin"><AssessmentEditorPage /></RequireRole>} />
       <Route path="admin/students" element={<RequireRole role="admin"><StudentsPage /></RequireRole>} />
-      <Route path="admin/students/:studentId" element={<RequireRole role="admin"><StudentsPage /></RequireRole>} />
     </Route>
     <Route path="*" element={<NotFoundPage />} />
   </Routes>

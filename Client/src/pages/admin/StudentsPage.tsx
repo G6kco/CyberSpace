@@ -1,48 +1,98 @@
-import { ArrowDownAZ, Ban, CheckCircle2, Eye, GraduationCap, History, ShieldCheck, UserCheck, UserX } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { Drawer } from '../../components/ui/Drawer'
-import { DropdownItem, DropdownMenu } from '../../components/ui/DropdownMenu'
+import { useEffect, useState } from 'react'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
-import { Pagination } from '../../components/ui/Pagination'
-import { ProgressBar } from '../../components/ui/ProgressBar'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { useToast } from '../../components/ui/Toast'
-import { platformRepository } from '../../services/repositories'
-import type { StudentRecord } from '../../types/domain'
-
-type StudentAction = { kind: 'account' | 'eligibility'; student: StudentRecord }
-const PAGE_SIZE = 5
+import { attemptOutcome } from '../../lib/assessment'
+import { formatDateTime } from '../../lib/format'
+import { errorMessage } from '../../services/api'
+import { adminApi } from '../../services/assessments'
+import type { StudentRecord } from '../../types/assessment'
 
 export function StudentsPage() {
-  const params = useParams()
-  const navigate = useNavigate()
-  const { notify } = useToast()
-  const [students, setStudents] = useState<StudentRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [department, setDepartment] = useState('All')
-  const [year, setYear] = useState('All')
-  const [account, setAccount] = useState('All')
-  const [eligibility, setEligibility] = useState('All')
-  const [sortAsc, setSortAsc] = useState(true)
-  const [page, setPage] = useState(1)
-  const [selected, setSelected] = useState<StudentRecord | null>(null)
-  const [pending, setPending] = useState<StudentAction | null>(null)
-  const load = () => { setLoading(true); platformRepository.listStudents().then((records) => { setStudents(records); if (params.studentId) setSelected(records.find((item) => item.id === params.studentId) ?? null) }).catch(() => setError('Student records could not be loaded.')).finally(() => setLoading(false)) }
-  useEffect(load, [params.studentId])
-  const filtered = useMemo(() => students.filter((student) => (!search || `${student.name} ${student.registerNumber} ${student.email}`.toLowerCase().includes(search.toLowerCase())) && (department === 'All' || student.department === department) && (year === 'All' || String(student.year) === year) && (account === 'All' || (account === 'Active') === student.active) && (eligibility === 'All' || (eligibility === 'Eligible') === student.eligible)).sort((a, b) => (sortAsc ? 1 : -1) * a.name.localeCompare(b.name)), [students, search, department, year, account, eligibility, sortAsc])
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  useEffect(() => setPage(1), [search, department, year, account, eligibility])
-  const openStudent = (student: StudentRecord) => { setSelected(student); navigate(`/admin/students/${student.id}`) }
-  const execute = async () => { if (!pending) return; const patch = pending.kind === 'account' ? { active: !pending.student.active } : { eligible: !pending.student.eligible }; try { const updated = await platformRepository.updateStudent(pending.student.id, patch); setStudents((records) => records.map((student) => student.id === updated.id ? updated : student)); if (selected?.id === updated.id) setSelected(updated); notify(pending.kind === 'account' ? `Account ${updated.active ? 'activated' : 'deactivated'}.` : `Student marked ${updated.eligible ? 'eligible' : 'ineligible'}.`) } catch { notify('Student status could not be updated.', 'error') } finally { setPending(null) } }
-  const rowActions = (student: StudentRecord, close?: () => void) => <><DropdownItem onClick={() => { openStudent(student); close?.() }}><Eye className="h-4 w-4" />View student</DropdownItem><DropdownItem onClick={() => { setPending({ kind: 'account', student }); close?.() }}>{student.active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}{student.active ? 'Deactivate account' : 'Activate account'}</DropdownItem><DropdownItem onClick={() => { setPending({ kind: 'eligibility', student }); close?.() }}><ShieldCheck className="h-4 w-4" />Change eligibility</DropdownItem><DropdownItem onClick={() => { openStudent(student); close?.() }}><History className="h-4 w-4" />View attempt history</DropdownItem></>
-  return <div className="space-y-6"><div><p className="eyebrow">Student records</p><h2 className="page-heading">Student management</h2><p className="mt-2 max-w-2xl text-secondary">Manage account access and assessment eligibility without deleting academic records.</p></div><section className="surface"><div className="border-b border-border p-4 sm:p-5"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_repeat(4,minmax(140px,0.55fr))]"><SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search student, register number, or email" /><Select label="Department" value={department} setValue={setDepartment} values={Array.from(new Set(students.map((item) => item.department)))} /><Select label="Year" value={year} setValue={setYear} values={['2', '3', '4']} /><Select label="Account status" value={account} setValue={setAccount} values={['Active', 'Inactive']} /><Select label="Eligibility" value={eligibility} setValue={setEligibility} values={['Eligible', 'Ineligible']} /></div></div><div className="p-4 sm:p-5">{loading ? <LoadingSkeleton rows={5} /> : error ? <ErrorState message={error} onRetry={load} /> : visible.length === 0 ? <EmptyState title="No students match" description="Clear or adjust the student filters." /> : <><div className="hidden overflow-x-auto lg:block"><table className="w-full text-left"><thead><tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted"><th className="pb-3 pr-4"><button onClick={() => setSortAsc((value) => !value)} className="inline-flex items-center gap-1 hover:text-strong">Student<ArrowDownAZ className="h-4 w-4" /></button></th><th className="px-4 pb-3">Department & year</th><th className="px-4 pb-3">Account</th><th className="px-4 pb-3">Eligibility</th><th className="px-4 pb-3">Last assessment</th><th className="px-4 pb-3">Completion</th><th className="pb-3 pl-4 text-right">Actions</th></tr></thead><tbody>{visible.map((student) => <tr key={student.id} className="border-b border-border last:border-0"><td className="py-4 pr-4"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-primary-light text-sm font-bold text-primary-dark">{student.initials}</div><div><p className="font-semibold text-strong">{student.name}</p><p className="text-sm text-secondary">{student.registerNumber}</p></div></div></td><td className="px-4 py-4"><p className="text-sm font-medium text-strong">{student.department}</p><p className="text-sm text-secondary">Year {student.year}</p></td><td className="px-4 py-4"><StatusBadge tone={student.active ? 'success' : 'danger'}>{student.active ? 'Active' : 'Inactive'}</StatusBadge></td><td className="px-4 py-4"><StatusBadge tone={student.eligible ? 'info' : 'warning'}>{student.eligible ? 'Eligible' : 'Ineligible'}</StatusBadge></td><td className="px-4 py-4 text-sm text-secondary">{student.lastAssessment}</td><td className="px-4 py-4"><div className="w-28"><ProgressBar value={student.completionRate} /></div><p className="mt-1 text-xs text-secondary">{student.completionRate}%</p></td><td className="py-4 pl-4 text-right"><DropdownMenu>{(close) => rowActions(student, close)}</DropdownMenu></td></tr>)}</tbody></table></div><div className="space-y-3 lg:hidden">{visible.map((student) => <article key={student.id} className="rounded-lg border border-border p-4"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-full bg-primary-light text-sm font-bold text-primary-dark">{student.initials}</div><div><p className="font-semibold">{student.name}</p><p className="text-sm text-secondary">{student.registerNumber}</p></div></div><DropdownMenu>{(close) => rowActions(student, close)}</DropdownMenu></div><p className="mt-3 text-sm text-secondary">{student.department} · Year {student.year}</p><div className="mt-3 flex gap-2"><StatusBadge tone={student.active ? 'success' : 'danger'}>{student.active ? 'Active' : 'Inactive'}</StatusBadge><StatusBadge tone={student.eligible ? 'info' : 'warning'}>{student.eligible ? 'Eligible' : 'Ineligible'}</StatusBadge></div><div className="mt-4"><ProgressBar value={student.completionRate} label="Completion" /></div></article>)}</div><Pagination page={page} totalPages={totalPages} onPageChange={setPage} /></>}</div></section><Drawer open={Boolean(selected)} title={selected?.name ?? 'Student details'} description={selected ? `${selected.registerNumber} · ${selected.email}` : undefined} onClose={() => { setSelected(null); navigate('/admin/students') }}>{selected && <StudentDetails student={selected} />}</Drawer><ConfirmDialog open={Boolean(pending)} title={pending?.kind === 'account' ? `${pending.student.active ? 'Deactivate' : 'Activate'} this account?` : 'Change assessment eligibility?'} description={pending?.kind === 'account' ? `This will ${pending.student.active ? 'block' : 'restore'} sign-in access for ${pending.student.name}. Academic records remain unchanged.` : `${pending?.student.name} will be marked ${pending?.student.eligible ? 'ineligible' : 'eligible'} for future assessment approval.`} confirmLabel={pending?.kind === 'account' ? `${pending.student.active ? 'Deactivate' : 'Activate'} account` : `Mark ${pending?.student.eligible ? 'ineligible' : 'eligible'}`} tone={pending?.kind === 'account' && pending.student.active ? 'danger' : 'primary'} requireReason onCancel={() => setPending(null)} onConfirm={execute} /></div>
-}
+  const [records, setRecords] = useState<StudentRecord[] | null>(null)
+  const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
 
-function Select({ label, value, setValue, values }: { label: string; value: string; setValue: (value: string) => void; values: string[] }) { return <label><span className="sr-only">{label}</span><select className="input" value={value} onChange={(e) => setValue(e.target.value)}><option value="All">All {label.toLowerCase()} values</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label> }
-function StudentDetails({ student }: { student: StudentRecord }) { return <div className="space-y-6"><div className="flex items-center gap-4 rounded-lg bg-app p-4"><div className="grid h-12 w-12 place-items-center rounded-full bg-primary-light font-bold text-primary-dark">{student.initials}</div><div><p className="font-semibold text-strong">{student.name}</p><p className="text-sm text-secondary">{student.department} · Year {student.year}</p></div></div><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border border-border p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted">Account state</p><div className="mt-2"><StatusBadge tone={student.active ? 'success' : 'danger'}>{student.active ? 'Active' : 'Inactive'}</StatusBadge></div></div><div className="rounded-lg border border-border p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted">Eligibility</p><div className="mt-2"><StatusBadge tone={student.eligible ? 'info' : 'warning'}>{student.eligible ? 'Eligible' : 'Ineligible'}</StatusBadge></div></div></div><section><h3 className="flex items-center gap-2 font-semibold"><GraduationCap className="h-4 w-4 text-primary" />Completion summary</h3><div className="mt-3 rounded-lg border border-border p-4"><ProgressBar value={student.completionRate} label="Learning completion" /><p className="mt-3 text-sm text-secondary">{student.attempts} previous assessment attempts</p></div></section><section><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-primary" />Previous attempts</h3><div className="mt-3 rounded-lg border border-border"><div className="flex items-center justify-between border-b border-border p-4"><div><p className="font-medium">{student.lastAssessment}</p><p className="text-sm text-secondary">Most recent attempt</p></div>{student.attempts > 0 ? <CheckCircle2 className="h-5 w-5 text-success" /> : <Ban className="h-5 w-5 text-muted" />}</div><p className="p-4 text-sm text-secondary">Detailed attempt history will be loaded from the assessment service when the backend is connected.</p></div></section><section><h3 className="font-semibold">Administrative notes</h3><textarea className="input mt-3 min-h-28" defaultValue={student.notes} placeholder="Add an internal note (mock only)" /><p className="mt-2 text-xs text-secondary">Notes are not persisted after a browser refresh in this prototype.</p></section></div> }
+  // The server filters; a short pause avoids a request per keystroke.
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      adminApi
+        .students(search.trim())
+        .then((result) => { if (!cancelled) { setRecords(result); setError('') } })
+        .catch((err) => { if (!cancelled) setError(errorMessage(err, 'Students could not be loaded.')) })
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [search, reload])
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="eyebrow">Student records</p>
+        <h2 className="page-heading">Students</h2>
+        <p className="mt-2 max-w-2xl text-secondary">Level progress, latest attempt, and retake cooldown for every student account.</p>
+      </div>
+      <section className="surface">
+        <div className="border-b border-border p-4 sm:p-5">
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, email, or register number" maxLength={100} />
+        </div>
+        <div className="p-4 sm:p-5">
+          {error ? (
+            <ErrorState message={error} onRetry={() => setReload((n) => n + 1)} />
+          ) : !records ? (
+            <LoadingSkeleton rows={5} />
+          ) : records.length === 0 ? (
+            <EmptyState title="No students found" description="Student accounts are created by an administrator; none match this search." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-muted">
+                  <tr>
+                    <th className="pb-3 font-semibold">Student</th>
+                    <th className="pb-3 font-semibold">Account</th>
+                    <th className="pb-3 font-semibold">Levels passed</th>
+                    <th className="pb-3 font-semibold">Latest attempt</th>
+                    <th className="pb-3 font-semibold">Retake</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {records.map((record) => {
+                    const outcome = record.lastAttempt ? attemptOutcome(record.lastAttempt) : null
+                    return (
+                      <tr key={record.id}>
+                        <td className="py-3">
+                          <p className="font-medium text-strong">{record.name}</p>
+                          <p className="text-xs text-secondary">{record.registerNumber ? `${record.registerNumber} · ` : ''}{record.email}</p>
+                        </td>
+                        <td className="py-3">
+                          <StatusBadge tone={record.status === 'active' ? 'success' : 'neutral'}>{record.status}</StatusBadge>
+                        </td>
+                        <td className="py-3 font-medium text-strong">{record.levelsPassed}</td>
+                        <td className="py-3">
+                          {record.lastAttempt && outcome ? (
+                            <>
+                              <StatusBadge tone={outcome.tone}>{outcome.label}</StatusBadge>
+                              <p className="mt-1 text-xs text-secondary">
+                                {record.lastAttempt.level} · {record.lastAttempt.status === 'revoked' ? 'revoked' : `${record.lastAttempt.score}/${record.lastAttempt.maxScore}`}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="text-secondary">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 text-secondary">
+                          {record.cooldownUntil ? `After ${formatDateTime(record.cooldownUntil)}` : 'Available'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}

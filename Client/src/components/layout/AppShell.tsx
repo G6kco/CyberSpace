@@ -7,9 +7,11 @@ import { navigation } from '../../routes/navigation'
 const pageTitles: Record<string, string> = {
   '/student/learning': 'Learning Materials',
   '/student/assessments': 'Assessments',
-  '/admin/monitoring': 'Student Monitoring',
-  '/admin/assessments': 'Assessment Management',
-  '/admin/students': 'Student Management',
+  '/student/lobby': 'Test Portal',
+  '/student/attempts': 'Assessment',
+  '/admin/monitoring': 'Assessment Monitoring',
+  '/admin/assessments': 'Question Bank',
+  '/admin/students': 'Students',
 }
 
 export function AppShell() {

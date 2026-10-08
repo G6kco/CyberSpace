@@ -1,41 +1,137 @@
-import { Archive, Copy, Edit3, FilePlus2, Send, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileWarning } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Button } from '../../components/ui/Button'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { DropdownItem, DropdownMenu } from '../../components/ui/DropdownMenu'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
-import { Pagination } from '../../components/ui/Pagination'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { useToast } from '../../components/ui/Toast'
-import { formatDateTime, minutesLabel } from '../../lib/format'
-import { platformRepository } from '../../services/repositories'
-import type { AssessmentDefinition, AssessmentStatus } from '../../types/domain'
+import { poolName } from '../../lib/assessment'
+import { errorMessage } from '../../services/api'
+import { adminApi } from '../../services/assessments'
+import type { BankAssessment, BankQuestion, Pool } from '../../types/assessment'
 
-type DefinitionAction = { kind: 'publish' | 'unpublish' | 'archive' | 'delete'; assessment: AssessmentDefinition }
-const PAGE_SIZE = 5
-
+// The question bank of every published level. It is read-only here: the
+// bank is imported on the server (cmd/import-questions) and answers are
+// stored only as keyed hashes, so they cannot be shown.
 export function AssessmentManagementPage() {
-  const [items, setItems] = useState<AssessmentDefinition[]>([])
-  const [loading, setLoading] = useState(true)
+  const [bank, setBank] = useState<BankAssessment[] | null>(null)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [status, setStatus] = useState<AssessmentStatus | 'All'>('All')
-  const [difficulty, setDifficulty] = useState('All')
-  const [page, setPage] = useState(1)
-  const [pending, setPending] = useState<DefinitionAction | null>(null)
-  const { notify } = useToast()
-  const navigate = useNavigate()
-  const load = () => { setLoading(true); setError(''); platformRepository.listAssessmentDefinitions().then(setItems).catch(() => setError('Assessment definitions could not be loaded.')).finally(() => setLoading(false)) }
+  const [pool, setPool] = useState<Pool | 'all'>('all')
+
+  const load = () => {
+    setError('')
+    adminApi.questionBank().then(setBank).catch((err) => setError(errorMessage(err, 'The question bank could not be loaded.')))
+  }
   useEffect(load, [])
-  const filtered = useMemo(() => items.filter((item) => (!search || `${item.name} ${item.slug} ${item.description}`.toLowerCase().includes(search.toLowerCase())) && (status === 'All' || item.status === status) && (difficulty === 'All' || item.difficulty === difficulty)), [items, search, status, difficulty])
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const duplicate = async (assessment: AssessmentDefinition) => { const copy: AssessmentDefinition = { ...structuredClone(assessment), id: `${assessment.id}-copy-${items.length + 1}`, name: `${assessment.name} Copy`, slug: `${assessment.slug}-copy`, status: 'draft', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; await platformRepository.saveAssessment(copy); setItems((records) => [copy, ...records]); notify('Draft copy created.'); navigate(`/admin/assessments/${copy.id}/edit`) }
-  const execute = async () => { if (!pending) return; const { kind, assessment } = pending; try { if (kind === 'delete') { await platformRepository.deleteAssessment(assessment.id); setItems((records) => records.filter((item) => item.id !== assessment.id)); notify('Draft assessment deleted.') } else { const nextStatus: AssessmentStatus = kind === 'archive' ? 'archived' : kind === 'publish' ? 'published' : 'draft'; const updated = { ...assessment, status: nextStatus, updatedAt: new Date().toISOString() }; await platformRepository.saveAssessment(updated); setItems((records) => records.map((item) => item.id === updated.id ? updated : item)); notify(kind === 'archive' ? 'Assessment archived.' : kind === 'publish' ? 'Assessment published.' : 'Assessment unpublished to draft.') } } catch { notify('Assessment action failed.', 'error') } finally { setPending(null) } }
-  const actions = (assessment: AssessmentDefinition, close: () => void) => <><DropdownItem onClick={() => { navigate(`/admin/assessments/${assessment.id}/edit`); close() }}><Edit3 className="h-4 w-4" />Edit assessment</DropdownItem><DropdownItem onClick={() => { duplicate(assessment); close() }}><Copy className="h-4 w-4" />Duplicate as draft</DropdownItem>{assessment.status !== 'archived' && <DropdownItem onClick={() => { setPending({ kind: assessment.status === 'published' ? 'unpublish' : 'publish', assessment }); close() }}><Send className="h-4 w-4" />{assessment.status === 'published' ? 'Unpublish' : 'Publish'}</DropdownItem>}{assessment.status !== 'archived' && <DropdownItem onClick={() => { setPending({ kind: 'archive', assessment }); close() }}><Archive className="h-4 w-4" />Archive</DropdownItem>}{assessment.status === 'draft' && <DropdownItem danger onClick={() => { setPending({ kind: 'delete', assessment }); close() }}><Trash2 className="h-4 w-4" />Delete draft</DropdownItem>}</>
-  return <div className="space-y-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="eyebrow">Assessment catalogue</p><h2 className="page-heading">Assessment management</h2><p className="mt-2 max-w-2xl text-secondary">Create, review, and publish definitions for isolated college assessment labs.</p></div><Link to="/admin/assessments/new"><Button><FilePlus2 className="h-4 w-4" />Create assessment</Button></Link></div><div className="grid gap-3 sm:grid-cols-3"><Summary label="Published" value={items.filter((item) => item.status === 'published').length} tone="success" /><Summary label="Drafts" value={items.filter((item) => item.status === 'draft').length} tone="warning" /><Summary label="Archived" value={items.filter((item) => item.status === 'archived').length} tone="neutral" /></div><section className="surface"><div className="grid gap-3 border-b border-border p-4 sm:grid-cols-[1fr_180px_180px] sm:p-5"><SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, slug, or description" /><label><span className="sr-only">Status</span><select className="input" value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option>All</option><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></label><label><span className="sr-only">Difficulty</span><select className="input" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}><option>All</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label></div><div className="p-4 sm:p-5">{loading ? <LoadingSkeleton rows={4} /> : error ? <ErrorState message={error} onRetry={load} /> : visible.length === 0 ? <EmptyState title="No assessments match" description="Adjust the filters or create a new assessment." /> : <div className="space-y-3">{visible.map((assessment) => <article key={assessment.id} className="grid gap-4 rounded-lg border border-border p-4 lg:grid-cols-[minmax(0,1fr)_160px_160px_44px] lg:items-center"><div><div className="flex flex-wrap items-center gap-2"><StatusBadge tone={assessment.status === 'published' ? 'success' : assessment.status === 'draft' ? 'warning' : 'neutral'}>{assessment.status[0].toUpperCase() + assessment.status.slice(1)}</StatusBadge><span className="text-xs font-medium text-secondary">{assessment.level} · {assessment.difficulty}</span></div><h3 className="mt-2 font-semibold text-strong">{assessment.name}</h3><p className="mt-1 font-mono text-xs text-secondary">{assessment.slug}</p><p className="mt-2 line-clamp-1 text-sm text-secondary">{assessment.description}</p></div><div><p className="text-xs font-semibold uppercase tracking-wide text-muted">Structure</p><p className="mt-1 text-sm font-medium">{assessment.questions.length} questions · {minutesLabel(assessment.duration)}</p></div><div><p className="text-xs font-semibold uppercase tracking-wide text-muted">Updated</p><p className="mt-1 text-sm font-medium">{formatDateTime(assessment.updatedAt)}</p></div><DropdownMenu>{(close) => actions(assessment, close)}</DropdownMenu></article>)}<Pagination page={page} totalPages={pages} onPageChange={setPage} /></div>}</div></section><ConfirmDialog open={Boolean(pending)} title={pending?.kind === 'delete' ? 'Delete draft assessment?' : pending?.kind === 'archive' ? 'Archive assessment?' : pending?.kind === 'publish' ? 'Publish assessment?' : 'Unpublish assessment?'} description={pending?.kind === 'delete' ? 'This removes the draft from the mock repository. Published assessment records cannot be deleted here.' : pending?.kind === 'archive' ? 'Archived assessments are removed from active use but kept for academic records.' : pending?.kind === 'publish' ? 'The definition will become available for future booking and approval workflows.' : 'The assessment will return to draft and stop accepting future bookings.'} confirmLabel={pending?.kind === 'delete' ? 'Delete draft' : pending?.kind === 'archive' ? 'Archive assessment' : pending?.kind === 'publish' ? 'Publish assessment' : 'Unpublish assessment'} tone={pending?.kind === 'delete' || pending?.kind === 'archive' ? 'danger' : 'primary'} onCancel={() => setPending(null)} onConfirm={execute} /></div>
+
+  if (!bank && !error) return <LoadingSkeleton rows={5} />
+  if (!bank) return <ErrorState message={error} onRetry={load} />
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="eyebrow">Assessment catalogue</p>
+        <h2 className="page-heading">Question bank</h2>
+        <p className="mt-2 max-w-2xl text-secondary">
+          Each attempt deals one random question from each pool. Expected flags are stored as keyed hashes and are never shown.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+        <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search questions" />
+        <label>
+          <span className="sr-only">Pool</span>
+          <select className="input" value={pool} onChange={(e) => setPool(e.target.value as Pool | 'all')}>
+            <option value="all">All pools</option>
+            <option value="wireshark">Wireshark</option>
+            <option value="nmap">Nmap</option>
+          </select>
+        </label>
+      </div>
+      {bank.length === 0 ? (
+        <EmptyState title="No published assessments" description="Import the question bank on the server to publish Level 1." />
+      ) : (
+        bank.map((assessment) => <AssessmentBank key={assessment.level} assessment={assessment} search={search} pool={pool} />)
+      )}
+    </div>
+  )
 }
 
-function Summary({ label, value, tone }: { label: string; value: number; tone: 'success' | 'warning' | 'neutral' }) { const color = tone === 'success' ? 'text-success' : tone === 'warning' ? 'text-warning' : 'text-secondary'; return <div className="surface p-4"><p className={`text-2xl font-semibold ${color}`}>{value}</p><p className="mt-1 text-sm text-secondary">{label}</p></div> }
+function AssessmentBank({ assessment, search, pool }: { assessment: BankAssessment; search: string; pool: Pool | 'all' }) {
+  const questions = useMemo(() => {
+    const term = search.toLowerCase()
+    return assessment.questions.filter(
+      (q) => (pool === 'all' || q.pool === pool) && (!term || `${q.code} ${q.prompt} ${q.flagPrompts.join(' ')}`.toLowerCase().includes(term)),
+    )
+  }, [assessment.questions, search, pool])
+  const missing = assessment.questions.filter((q) => q.pool === 'wireshark' && !q.pcapPresent)
+  const count = (p: Pool, d: string) => assessment.questions.filter((q) => q.pool === p && q.difficulty === d).length
+
+  return (
+    <section className="surface">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-4 sm:p-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <StatusBadge tone="info">{assessment.level}</StatusBadge>
+            <StatusBadge tone="success">Published</StatusBadge>
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-strong">{assessment.title}</h3>
+          <p className="mt-1 text-sm text-secondary">
+            {Math.round(assessment.durationSeconds / 60)} minutes · pass {assessment.passScore} / {assessment.totalPoints}
+          </p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+          {(['wireshark', 'nmap'] as const).map((p) => (
+            <div key={p} className="contents">
+              <dt className="text-secondary">{poolName[p]}</dt>
+              <dd className="font-medium text-strong">{count(p, 'easy')} easy · {count(p, 'hard')} hard</dd>
+            </div>
+          ))}
+        </dl>
+      </header>
+      {missing.length > 0 && (
+        <div role="alert" className="flex items-start gap-3 border-b border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <FileWarning className="mt-0.5 h-5 w-5 shrink-0" />
+          <p>
+            {missing.length} capture file(s) are missing from the server's capture directory:{' '}
+            <span className="font-mono">{missing.map((q) => q.pcapFile).join(', ')}</span>. Students dealt these questions cannot download them.
+          </p>
+        </div>
+      )}
+      <div className="divide-y divide-border">
+        {questions.length === 0 ? (
+          <div className="p-5"><EmptyState title="No questions match" description="Adjust the search or pool filter." /></div>
+        ) : (
+          questions.map((q) => <QuestionRow key={q.id} question={q} />)
+        )}
+      </div>
+    </section>
+  )
+}
+
+function QuestionRow({ question }: { question: BankQuestion }) {
+  return (
+    <details className="group p-4 sm:px-5">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3">
+        <span className="font-mono text-sm font-semibold text-strong">{question.code}</span>
+        <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>
+        <span className="text-sm text-secondary">{question.points} pts · {question.flagPrompts.length} flag(s)</span>
+        <span className="flex items-center gap-1.5 text-sm text-secondary">
+          {question.pool === 'wireshark' ? (
+            <>
+              {question.pcapPresent ? <CheckCircle2 className="h-4 w-4 text-success" /> : <AlertTriangle className="h-4 w-4 text-warning" />}
+              <span className="font-mono">{question.pcapFile}</span>
+            </>
+          ) : (
+            <>image <span className="font-mono">{question.image}</span></>
+          )}
+        </span>
+        <span className="ml-auto text-xs text-muted">dealt {question.timesDealt}×</span>
+      </summary>
+      <div className="mt-3 space-y-3 text-sm">
+        <p className="whitespace-pre-line text-strong">{question.prompt}</p>
+        <ol className="list-decimal space-y-1 pl-5 text-secondary">
+          {question.flagPrompts.map((prompt, i) => <li key={i}>{prompt}</li>)}
+        </ol>
+      </div>
+    </details>
+  )
+}

@@ -31,6 +31,8 @@ type authServer struct {
 	router *gin.Engine
 	logs   *observer.ObservedLogs
 	secure bool
+	// application lets a test add dependencies and rebuild the router.
+	application *app.App
 }
 
 func newAuthServer(t *testing.T, appEnv string) *authServer {
@@ -68,6 +70,8 @@ func newAuthServer(t *testing.T, appEnv string) *authServer {
 		router: NewRouter(application),
 		logs:   logs,
 		secure: appEnv == "production",
+
+		application: application,
 	}
 }
 
