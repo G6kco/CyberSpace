@@ -1,6 +1,5 @@
 import type { Role, User } from '../types/domain'
-
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
+import { apiBase } from './api'
 
 // The server returns the identity it trusts. It does not send display
 // initials, so they are derived here to keep the avatar working without

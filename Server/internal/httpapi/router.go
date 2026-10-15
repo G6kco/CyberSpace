@@ -9,6 +9,11 @@ import (
 // NewRouter builds the HTTP transport with dependencies supplied explicitly.
 func NewRouter(application *app.App) *gin.Engine {
 	router := gin.New()
+	// In production nginx on the same host proxies every request, so the
+	// forwarding headers are trusted only from loopback. nginx overwrites
+	// them, so a client cannot spoof the IP recorded in audit logs. A
+	// request from anywhere else keeps its connection address.
+	_ = router.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	router.Use(gin.Recovery())
 	router.Use(middleware.InitCORS(application.Config.AllowedOrigins))
 
@@ -34,6 +39,23 @@ func NewRouter(application *app.App) *gin.Engine {
 		protected.Use(handler.requireSession())
 		protected.GET("/me", handler.me)
 		protected.DELETE("/auth/session", handler.logout)
+
+		if application.Assessments != nil {
+			guarded := protected.Group("", requireOrigin(application.Config.FrontendURL))
+			registerAssessmentRoutes(guarded, &assessmentHandler{
+				service: application.Assessments,
+				logger:  application.Logger,
+			})
+			application.Logger.Info("Assessment routes registered")
+		}
+		if application.Levels != nil {
+			guarded := protected.Group("", requireOrigin(application.Config.FrontendURL))
+			registerLevelRoutes(guarded, &levelHandler{
+				service: application.Levels,
+				logger:  application.Logger,
+			})
+			application.Logger.Info("Level builder routes registered")
+		}
 
 		application.Logger.Info("Authentication routes registered")
 	}

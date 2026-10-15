@@ -87,6 +87,8 @@ func setValidEnvironment(t *testing.T) {
 		"GOOGLE_CALL_BACK":      "https://api.example.test/api/v1/auth/google/callback",
 		"GOOGLE_ALLOWED_DOMAIN": "example.test",
 		"DOCKER_HOST":           "",
+		"ANSWER_HMAC_KEY":       strings.Repeat("k", 32),
+		"PCAP_DIR":              "",
 	}
 
 	for key, value := range values {

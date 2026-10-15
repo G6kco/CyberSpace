@@ -1,4 +1,4 @@
-import { BookOpen, ClipboardCheck, MonitorCog, ShieldCheck, Users } from 'lucide-react'
+import { BookOpen, ClipboardCheck, Layers, MonitorCog, ShieldCheck, Users } from 'lucide-react'
 import type { Role } from '../types/domain'
 
 export const navigation = {
@@ -7,9 +7,10 @@ export const navigation = {
     { label: 'Assessments', to: '/student/assessments', icon: ClipboardCheck },
   ],
   admin: [
-    { label: 'Student Monitoring', to: '/admin/monitoring', icon: MonitorCog },
-    { label: 'Assessment Management', to: '/admin/assessments', icon: ShieldCheck },
-    { label: 'Student Management', to: '/admin/students', icon: Users },
+    { label: 'Assessment Monitoring', to: '/admin/monitoring', icon: MonitorCog },
+    { label: 'Levels', to: '/admin/levels', icon: Layers },
+    { label: 'Question Bank', to: '/admin/assessments', icon: ShieldCheck },
+    { label: 'Students', to: '/admin/students', icon: Users },
   ],
 } satisfies Record<Role, Array<{ label: string; to: string; icon: typeof BookOpen }>>
 
