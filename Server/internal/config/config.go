@@ -18,6 +18,9 @@ const (
 	defaultServerPort = 8080
 	// defaultPcapDir is relative to the directory the API is started from.
 	defaultPcapDir = "storage/pcaps"
+	// defaultFilesDir holds files uploaded in the level builder, relative to
+	// the directory the API is started from.
+	defaultFilesDir = "storage/files"
 	// minAnswerKeyLength matches evaluation.MinKeyLength.
 	minAnswerKeyLength = 32
 	// defaultCallBackURL = "http://localhost:8080/auth/google/callback"
@@ -41,6 +44,8 @@ type Config struct {
 	AnswerKey string
 	// PcapDir holds the Wireshark capture files served to students.
 	PcapDir string
+	// FilesDir holds the files administrators upload to built questions.
+	FilesDir string
 }
 
 // Load reads the optional .env file and the process environment, applies safe
@@ -92,6 +97,7 @@ func loadEnvironment() (*Config, error) {
 		),
 		AnswerKey: os.Getenv("ANSWER_HMAC_KEY"),
 		PcapDir:   strings.TrimSpace(os.Getenv("PCAP_DIR")),
+		FilesDir:  strings.TrimSpace(os.Getenv("FILES_DIR")),
 	}, nil
 }
 
@@ -107,6 +113,9 @@ func (cfg *Config) applyDefaults() {
 	}
 	if cfg.PcapDir == "" {
 		cfg.PcapDir = defaultPcapDir
+	}
+	if cfg.FilesDir == "" {
+		cfg.FilesDir = defaultFilesDir
 	}
 
 	cfg.AppEnv = strings.ToLower(cfg.AppEnv)

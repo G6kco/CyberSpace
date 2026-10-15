@@ -41,8 +41,10 @@ func (stubAssessmentRepo) Students(context.Context, []uint64) ([]assessments.Stu
 
 type noLabs struct{}
 
-func (noLabs) RequestProvision(context.Context, uint64, uint64) (uint64, error) { return 0, nil }
-func (noLabs) RequestStop(context.Context, uint64) error                        { return nil }
+func (noLabs) RequestProvision(context.Context, uint64, uint64, uint64) (uint64, error) {
+	return 0, nil
+}
+func (noLabs) RequestStop(context.Context, uint64) error { return nil }
 
 func newAssessmentServer(t *testing.T) *authServer {
 	t.Helper()

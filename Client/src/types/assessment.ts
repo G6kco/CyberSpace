@@ -4,7 +4,10 @@
 export type StudentStatus = 'eligible' | 'cooldown' | 'in_progress' | 'completed' | 'unavailable'
 export type AttemptStatus = 'ready' | 'starting' | 'in_progress' | 'submitted' | 'expired' | 'revoked' | 'failed' | 'evaluated'
 export type AttemptResult = 'pending' | 'passed' | 'failed'
-export type Pool = 'wireshark' | 'nmap'
+// Level 1 deals one Wireshark and one Nmap question; a level built in the
+// level builder deals scenario questions, each with its own optional lab.
+export type Pool = 'wireshark' | 'nmap' | 'scenario'
+export type Difficulty = 'easy' | 'hard' | ''
 export type LabStatus = 'queued' | 'provisioning' | 'running' | 'stopping' | 'stopped' | 'failed'
 
 export interface AssessmentInfo {
@@ -15,6 +18,10 @@ export interface AssessmentInfo {
   passScore: number
   totalPoints: number
   instructions: string
+  // Set for a built level: the pass mark is a percentage of the marks of
+  // the questions each student is dealt.
+  questionsPerAttempt?: number
+  passPercent: number | null
 }
 
 export interface AttemptSummary {
@@ -51,16 +58,26 @@ export interface FlagSlot {
   submissions: number
 }
 
+export interface QuestionFile {
+  id: number
+  name: string
+  size: number
+}
+
 export interface DealtQuestion {
   id: number
   code: string
   pool: Pool
-  difficulty: 'easy' | 'hard'
+  difficulty: Difficulty
   prompt: string
   points: number
   score: number
   hasPcap: boolean
   flags: FlagSlot[]
+  files: QuestionFile[]
+  // Each question with a lab has its own container and IP.
+  hasLab: boolean
+  lab: LabView | null
 }
 
 export interface LabView {
@@ -70,7 +87,6 @@ export interface LabView {
 
 export interface AttemptView extends AttemptSummary {
   questions: DealtQuestion[] | null
-  lab: LabView | null
   serverTime: string
 }
 
@@ -107,7 +123,6 @@ export interface ActionResult {
 
 export interface AdminAttempt extends AttemptSummary {
   student: StudentRef
-  lab: LabView | null
   questions: DealtQuestion[]
 }
 
@@ -115,7 +130,7 @@ export interface BankQuestion {
   id: number
   code: string
   pool: Pool
-  difficulty: 'easy' | 'hard'
+  difficulty: Difficulty
   prompt: string
   points: number
   flagPrompts: string[]

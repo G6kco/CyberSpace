@@ -43,7 +43,7 @@ func newFakeRepo(jobs ...Job) *fakeRepo {
 	}
 }
 
-func (f *fakeRepo) RequestProvision(context.Context, uint64, uint64) (uint64, error) {
+func (f *fakeRepo) RequestProvision(context.Context, uint64, uint64, uint64) (uint64, error) {
 	return 0, errors.New("not used")
 }
 func (f *fakeRepo) RequestStop(_ context.Context, attemptID uint64) error {

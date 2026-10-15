@@ -24,6 +24,8 @@ type Config struct {
 	AnswerKey []byte
 	// PcapDir holds the Wireshark capture files.
 	PcapDir string
+	// FilesDir holds the files administrators upload to built questions.
+	FilesDir string
 	// Cooldown is how long a student who did not pass waits to retake.
 	Cooldown time.Duration
 	// AttendanceWindow is how long taken attendance stays valid for a start.
@@ -126,8 +128,8 @@ func (s *Service) Attempt(ctx context.Context, userID, attemptID uint64) (Attemp
 	}
 	view.ServerTime = s.now()
 	if view.Status != "in_progress" {
-		// The questions and lab belong to the sitting, not the record.
-		view.Questions, view.Lab = nil, nil
+		// The questions and labs belong to the sitting, not the record.
+		view.Questions = nil
 		return view, nil
 	}
 	for i := range view.Questions {
@@ -184,6 +186,34 @@ func (s *Service) Pcap(ctx context.Context, userID, attemptID, questionID uint64
 			return "", "", fmt.Errorf("%w: capture file unavailable", ErrNotFound)
 		}
 		return path, name, nil
+	}
+	return "", "", ErrNotFound
+}
+
+// File returns a file of a question dealt to the student's attempt, only
+// while the attempt is in progress.
+func (s *Service) File(ctx context.Context, userID, attemptID, fileID uint64) (path, name string, err error) {
+	view, err := s.Attempt(ctx, userID, attemptID)
+	if err != nil {
+		return "", "", err
+	}
+	if view.Status != "in_progress" {
+		return "", "", ErrAttemptClosed
+	}
+	for _, q := range view.Questions {
+		for _, f := range q.Files {
+			if f.ID != fileID {
+				continue
+			}
+			// stored_name is 32 hex digits by CHECK constraint; Base is a
+			// second guard so no stored value can leave the directory.
+			path := filepath.Join(s.cfg.FilesDir, filepath.Base(f.StoredName))
+			if _, err := os.Stat(path); err != nil {
+				s.logger.Error("Question file missing", zap.String("file", path), zap.Error(err))
+				return "", "", fmt.Errorf("%w: file unavailable", ErrNotFound)
+			}
+			return path, f.Name, nil
+		}
 	}
 	return "", "", ErrNotFound
 }
@@ -277,7 +307,7 @@ func (s *Service) CancelAttendance(ctx context.Context, actor Actor, studentID s
 }
 
 // Start starts the assessment for students whose attendance is taken: each
-// is dealt their questions and their lab is queued.
+// is dealt their questions and a lab is queued for every question with one.
 func (s *Service) Start(ctx context.Context, actor Actor, studentIDs []string) []ActionResult {
 	return s.each(ctx, actor, "attempt.start", studentIDs, func(student Student, now time.Time) (ActionResult, error) {
 		overview, next, err := s.evaluate(ctx, student.ID, now)
@@ -305,13 +335,19 @@ func (s *Service) Start(ctx context.Context, actor Actor, studentIDs []string) [
 		s.presence.leave(student.ID)
 
 		result := ActionResult{AttemptID: &started.AttemptID}
-		if started.LabTemplateVersionID != 0 {
-			// The attempt stands even if no lab could be queued: the
-			// administrator sees the warning and can restart the lab.
-			if _, err := s.labs.RequestProvision(ctx, started.AttemptID, started.LabTemplateVersionID); err != nil {
-				s.logger.Error("Lab request failed", zap.Uint64("attempt", started.AttemptID), zap.Error(err))
-				result.Warning = "lab could not be queued: " + err.Error()
+		// The attempt stands even if a lab could not be queued: the
+		// administrator sees the warning and can restart that lab.
+		var failed []string
+		for _, lab := range started.Labs {
+			if _, err := s.labs.RequestProvision(ctx, started.AttemptID, lab.QuestionID, lab.LabTemplateVersionID); err != nil {
+				s.logger.Error("Lab request failed", zap.Uint64("attempt", started.AttemptID),
+					zap.Uint64("question", lab.QuestionID), zap.Error(err))
+				failed = append(failed, err.Error())
 			}
+		}
+		if len(failed) > 0 {
+			result.Warning = fmt.Sprintf("%d of %d lab(s) could not be queued: %s",
+				len(failed), len(started.Labs), strings.Join(failed, "; "))
 		}
 		return result, nil
 	})
@@ -350,15 +386,16 @@ func (s *Service) Revoke(ctx context.Context, actor Actor, attemptID uint64, rea
 	return summary, err
 }
 
-// RestartLab queues a fresh lab for an in-progress attempt whose lab failed
-// or stopped.
-func (s *Service) RestartLab(ctx context.Context, actor Actor, attemptID uint64) error {
-	err := s.restartLab(ctx, attemptID)
-	s.audit(ctx, actor, "lab.restart", "attempt", strconv.FormatUint(attemptID, 10), nil, err)
+// RestartLab queues a fresh lab for one question of an in-progress attempt
+// whose lab failed or stopped.
+func (s *Service) RestartLab(ctx context.Context, actor Actor, attemptID, questionID uint64) error {
+	err := s.restartLab(ctx, attemptID, questionID)
+	s.audit(ctx, actor, "lab.restart", "attempt", strconv.FormatUint(attemptID, 10),
+		map[string]uint64{"questionId": questionID}, err)
 	return err
 }
 
-func (s *Service) restartLab(ctx context.Context, attemptID uint64) error {
+func (s *Service) restartLab(ctx context.Context, attemptID, questionID uint64) error {
 	view, _, err := s.repo.Attempt(ctx, attemptID)
 	if err != nil {
 		return err
@@ -366,14 +403,16 @@ func (s *Service) restartLab(ctx context.Context, attemptID uint64) error {
 	if view.Status != "in_progress" {
 		return ErrAttemptClosed
 	}
-	templateID, err := s.repo.AttemptLab(ctx, attemptID)
-	if err != nil {
-		return err
+	var templateID uint64
+	for _, q := range view.Questions {
+		if q.ID == questionID {
+			templateID = q.LabTemplateVersionID
+		}
 	}
 	if templateID == 0 {
 		return ErrNoLab
 	}
-	_, err = s.labs.RequestProvision(ctx, attemptID, templateID)
+	_, err = s.labs.RequestProvision(ctx, attemptID, questionID, templateID)
 	if errors.Is(err, labs.ErrLabActive) {
 		return ErrLabActive
 	}
@@ -585,7 +624,7 @@ func Message(err error) string {
 	case errors.Is(err, ErrTooManySubmissions):
 		return "Too many submissions. Wait a moment and try again."
 	case errors.Is(err, ErrNoLab):
-		return "This attempt has no lab."
+		return "This question has no lab."
 	case errors.Is(err, ErrLabActive):
 		return "The lab is still running or starting."
 	case errors.Is(err, labs.ErrNoFreeAddress):

@@ -40,4 +40,6 @@ cover.out
 # every flag and real student records
 Server/storage/pcaps/*
 !Server/storage/pcaps/README.md
+Server/storage/files/
 Reference/
+.omc/

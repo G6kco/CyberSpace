@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"strings"
 	"time"
@@ -36,10 +37,11 @@ const attemptFrom = `
     JOIN assessments a ON a.id = v.assessment_id
     JOIN levels l ON l.id = a.level_id`
 
-// summaryColumns scans with scanSummary.
+// summaryColumns scans with scanSummary. A built level's attempt carries its
+// own pass mark, computed from the questions dealt to it.
 const summaryColumns = `t.id, l.name, a.title, t.status, t.result, t.score_awarded,
-    t.max_score, v.pass_score, t.started_at, t.deadline_at, t.ended_at,
-    COALESCE(t.termination_reason, '')`
+    t.max_score, COALESCE(t.pass_score, v.pass_score), t.started_at, t.deadline_at,
+    t.ended_at, COALESCE(t.termination_reason, '')`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -60,7 +62,8 @@ func scanSummary(row rowScanner, extra ...any) (assessments.AttemptSummary, erro
 func (r *AssessmentRepository) Catalog(ctx context.Context) ([]assessments.Assessment, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT l.id, l.name, l.sequence_no, a.id, a.title, v.id,
-                v.duration_seconds, v.pass_score, v.total_points, v.instructions
+                v.duration_seconds, v.pass_score, v.total_points, v.instructions,
+                COALESCE(v.questions_per_attempt, 0), v.pass_percent
         FROM levels l
         JOIN assessments a ON a.level_id = l.id AND a.status = 'published'
         JOIN assessment_versions v ON v.id = a.current_version_id AND v.status = 'published'
@@ -75,9 +78,14 @@ func (r *AssessmentRepository) Catalog(ctx context.Context) ([]assessments.Asses
 	seen := map[uint64]bool{}
 	for rows.Next() {
 		var a assessments.Assessment
+		var passPercent sql.NullFloat64
 		if err := rows.Scan(&a.LevelID, &a.LevelName, &a.LevelSequence, &a.AssessmentID, &a.Title,
-			&a.VersionID, &a.DurationSeconds, &a.PassScore, &a.TotalPoints, &a.Instructions); err != nil {
+			&a.VersionID, &a.DurationSeconds, &a.PassScore, &a.TotalPoints, &a.Instructions,
+			&a.QuestionsPerAttempt, &passPercent); err != nil {
 			return nil, err
+		}
+		if passPercent.Valid {
+			a.PassPercent = &passPercent.Float64
 		}
 		// One assessment per level: the first published one.
 		if seen[a.LevelID] {
@@ -394,43 +402,37 @@ func (r *AssessmentRepository) StartAttempt(
 		return assessments.Started{}, err
 	}
 
+	dealt, maxScore, passScore, err := dealQuestions(ctx, tx, req)
+	if err != nil {
+		return assessments.Started{}, err
+	}
+
 	attemptID, err := insertedID(tx.ExecContext(ctx,
 		`INSERT INTO attempts
-        (access_grant_id, status, started_by, started_at, deadline_at, max_score, created_at)
-        VALUES (?, 'in_progress', ?, ?, ?, ?, ?)`,
+        (access_grant_id, status, started_by, started_at, deadline_at, max_score,
+         pass_score, created_at)
+        VALUES (?, 'in_progress', ?, ?, ?, ?, ?, ?)`,
 		grantID, req.AdminID, req.Now,
-		req.Now.Add(time.Duration(req.DurationSeconds)*time.Second), req.MaxScore, req.Now))
+		req.Now.Add(time.Duration(req.DurationSeconds)*time.Second), maxScore, passScore, req.Now))
 	if err != nil {
 		return assessments.Started{}, err
 	}
 
 	started := assessments.Started{AttemptID: attemptID}
-	var codes []string
-	for i, pool := range assessments.Pools {
-		var questionID uint64
-		var code string
-		var labID sql.NullInt64
-		err := tx.QueryRowContext(ctx,
-			`SELECT id, code, lab_template_version_id FROM assessment_questions
-            WHERE assessment_version_id = ? AND pool = ? AND parent_question_id IS NULL
-            ORDER BY RAND() LIMIT 1`,
-			req.VersionID, pool).Scan(&questionID, &code, &labID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return assessments.Started{}, fmt.Errorf("the assessment has no %s questions", pool)
-		}
-		if err != nil {
-			return assessments.Started{}, err
-		}
+	codes := make([]string, 0, len(dealt))
+	for i, q := range dealt {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO attempt_questions (attempt_id, question_id, sequence_no, assigned_at)
             VALUES (?, ?, ?, ?)`,
-			attemptID, questionID, i+1, req.Now); err != nil {
+			attemptID, q.id, i+1, req.Now); err != nil {
 			return assessments.Started{}, err
 		}
-		if labID.Valid {
-			started.LabTemplateVersionID = uint64(labID.Int64)
+		if q.labID != 0 {
+			started.Labs = append(started.Labs, assessments.QuestionLab{
+				QuestionID: q.id, LabTemplateVersionID: q.labID,
+			})
 		}
-		codes = append(codes, code)
+		codes = append(codes, q.code)
 	}
 
 	if err := insertEvent(ctx, tx, attemptID, "started", req.AdminID, "", "in_progress",
@@ -438,6 +440,98 @@ func (r *AssessmentRepository) StartAttempt(
 		return assessments.Started{}, err
 	}
 	return started, tx.Commit()
+}
+
+// dealtRow is a top-level question chosen for a new attempt.
+type dealtRow struct {
+	id    uint64
+	code  string
+	labID uint64
+}
+
+// dealQuestions picks the attempt's questions. Level 1 deals one random
+// question per pool and is out of the version's total. A built level deals
+// questions_per_attempt random questions; its maximum is their marks and its
+// pass mark is pass_percent of that, so passScore is nil only for Level 1.
+func dealQuestions(ctx context.Context, tx *sql.Tx, req assessments.StartRequest) ([]dealtRow, float64, any, error) {
+	var perAttempt sql.NullInt64
+	var passPercent sql.NullFloat64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT questions_per_attempt, pass_percent FROM assessment_versions WHERE id = ?`,
+		req.VersionID).Scan(&perAttempt, &passPercent); err != nil {
+		return nil, 0, nil, err
+	}
+
+	scan := func(rows *sql.Rows) ([]dealtRow, error) {
+		defer rows.Close()
+		var dealt []dealtRow
+		for rows.Next() {
+			var q dealtRow
+			var labID sql.NullInt64
+			if err := rows.Scan(&q.id, &q.code, &labID); err != nil {
+				return nil, err
+			}
+			q.labID = uint64(labID.Int64)
+			dealt = append(dealt, q)
+		}
+		return dealt, rows.Err()
+	}
+
+	if !perAttempt.Valid {
+		var dealt []dealtRow
+		for _, pool := range assessments.Pools {
+			rows, err := tx.QueryContext(ctx,
+				`SELECT id, code, lab_template_version_id FROM assessment_questions
+                WHERE assessment_version_id = ? AND pool = ? AND parent_question_id IS NULL
+                ORDER BY RAND() LIMIT 1`,
+				req.VersionID, pool)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			one, err := scan(rows)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			if len(one) == 0 {
+				return nil, 0, nil, fmt.Errorf("the assessment has no %s questions", pool)
+			}
+			dealt = append(dealt, one[0])
+		}
+		return dealt, req.MaxScore, nil, nil
+	}
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, code, lab_template_version_id FROM assessment_questions
+        WHERE assessment_version_id = ? AND parent_question_id IS NULL
+        ORDER BY RAND() LIMIT ?`,
+		req.VersionID, perAttempt.Int64)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	dealt, err := scan(rows)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	if int64(len(dealt)) < perAttempt.Int64 {
+		return nil, 0, nil, fmt.Errorf("the assessment has %d questions; %d are dealt", len(dealt), perAttempt.Int64)
+	}
+
+	ids := make([]uint64, len(dealt))
+	for i, q := range dealt {
+		ids[i] = q.id
+	}
+	placeholders, args := inList(ids)
+	var maxScore float64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(points), 0) FROM assessment_questions
+        WHERE parent_question_id IN (`+placeholders+`)`,
+		args...).Scan(&maxScore); err != nil {
+		return nil, 0, nil, err
+	}
+	if maxScore <= 0 {
+		return nil, 0, nil, errors.New("the dealt questions carry no marks")
+	}
+	return dealt, maxScore, math.Round(maxScore*passPercent.Float64) / 100, nil
 }
 
 func (r *AssessmentRepository) Attempt(ctx context.Context, attemptID uint64) (assessments.AttemptView, uint64, error) {
@@ -463,12 +557,38 @@ func (r *AssessmentRepository) Attempt(ctx context.Context, attemptID uint64) (a
 		view.Questions = []assessments.DealtQuestion{}
 	}
 
-	labViews, err := r.labViews(ctx, []uint64{attemptID})
-	if err != nil {
+	if err := r.attachLabs(ctx, dealt); err != nil {
 		return view, 0, err
 	}
-	view.Lab = labViews[attemptID]
 	return view, owner, nil
+}
+
+// attachLabs sets each dealt question's lab. Labs requested before labs were
+// per question carry no question, so they belong to the attempt's one
+// question that has a lab.
+func (r *AssessmentRepository) attachLabs(ctx context.Context, dealt map[uint64][]assessments.DealtQuestion) error {
+	ids := make([]uint64, 0, len(dealt))
+	for id := range dealt {
+		ids = append(ids, id)
+	}
+	views, err := r.labViews(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for attemptID, questions := range dealt {
+		for i := range questions {
+			q := &questions[i]
+			if !q.HasLab {
+				continue
+			}
+			if lab, ok := views[attemptID][q.ID]; ok {
+				q.Lab = lab
+			} else {
+				q.Lab = views[attemptID][0]
+			}
+		}
+	}
+	return nil
 }
 
 // dealtQuestions returns each attempt's questions with their score; with
@@ -484,7 +604,7 @@ func (r *AssessmentRepository) dealtQuestions(
 	}
 	placeholders, args := inList(attemptIDs)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT aq.attempt_id, q.id, q.code, q.pool, q.difficulty, q.prompt,
+		`SELECT aq.attempt_id, q.id, q.code, q.pool, COALESCE(q.difficulty, ''), q.prompt,
                 COALESCE(q.pcap_file, ''), COALESCE(q.lab_template_version_id, 0),
                 (SELECT COALESCE(SUM(c.points), 0) FROM assessment_questions c
                  WHERE c.parent_question_id = q.id),
@@ -512,11 +632,42 @@ func (r *AssessmentRepository) dealtQuestions(
 		if !withFlags {
 			q.Prompt = ""
 		}
+		q.HasLab = q.LabTemplateVersionID != 0
 		q.Flags = []assessments.FlagView{}
+		q.Files = []assessments.FileView{}
 		result[attemptID] = append(result[attemptID], q)
 	}
 	if err := rows.Err(); err != nil || !withFlags {
 		return result, err
+	}
+
+	files, err := r.db.QueryContext(ctx,
+		`SELECT aq.attempt_id, f.question_id, f.id, f.original_name, f.size_bytes, f.stored_name
+        FROM attempt_questions aq
+        JOIN question_files f ON f.question_id = aq.question_id
+        WHERE aq.attempt_id IN (`+placeholders+`)
+        ORDER BY aq.attempt_id, f.id`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer files.Close()
+	for files.Next() {
+		var attemptID, questionID uint64
+		var f assessments.FileView
+		if err := files.Scan(&attemptID, &questionID, &f.ID, &f.Name, &f.Size, &f.StoredName); err != nil {
+			return nil, err
+		}
+		questions := result[attemptID]
+		for i := range questions {
+			if questions[i].ID == questionID {
+				questions[i].Files = append(questions[i].Files, f)
+				break
+			}
+		}
+	}
+	if err := files.Err(); err != nil {
+		return nil, err
 	}
 
 	flags, err := r.db.QueryContext(ctx,
@@ -552,15 +703,16 @@ func (r *AssessmentRepository) dealtQuestions(
 	return result, flags.Err()
 }
 
-// labViews returns the state of each attempt's newest lab.
-func (r *AssessmentRepository) labViews(ctx context.Context, attemptIDs []uint64) (map[uint64]*assessments.LabView, error) {
-	result := map[uint64]*assessments.LabView{}
+// labViews returns the state of the newest lab of each question of each
+// attempt, keyed by attempt and then question (0 for a lab with none).
+func (r *AssessmentRepository) labViews(ctx context.Context, attemptIDs []uint64) (map[uint64]map[uint64]*assessments.LabView, error) {
+	result := map[uint64]map[uint64]*assessments.LabView{}
 	if len(attemptIDs) == 0 {
 		return result, nil
 	}
 	placeholders, args := inList(attemptIDs)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT li.attempt_id, li.status, na.ip_address
+		`SELECT li.attempt_id, li.lab_slot, li.status, na.ip_address
         FROM lab_instances li
         LEFT JOIN lab_instance_services s
                ON s.lab_instance_id = li.id AND s.service_name = ?
@@ -568,7 +720,8 @@ func (r *AssessmentRepository) labViews(ctx context.Context, attemptIDs []uint64
         LEFT JOIN network_addresses na ON na.id = ia.network_address_id
         WHERE li.attempt_id IN (`+placeholders+`)
           AND li.generation_no = (
-              SELECT MAX(x.generation_no) FROM lab_instances x WHERE x.attempt_id = li.attempt_id
+              SELECT MAX(x.generation_no) FROM lab_instances x
+              WHERE x.attempt_id = li.attempt_id AND x.lab_slot = li.lab_slot
           )`,
 		append([]any{labs.TargetService}, args...)...)
 	if err != nil {
@@ -576,10 +729,10 @@ func (r *AssessmentRepository) labViews(ctx context.Context, attemptIDs []uint64
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var attemptID uint64
+		var attemptID, slot uint64
 		var status string
 		var address []byte
-		if err := rows.Scan(&attemptID, &status, &address); err != nil {
+		if err := rows.Scan(&attemptID, &slot, &status, &address); err != nil {
 			return nil, err
 		}
 		view := &assessments.LabView{Status: status}
@@ -588,7 +741,10 @@ func (r *AssessmentRepository) labViews(ctx context.Context, attemptIDs []uint64
 				view.IP = ip.Unmap().String()
 			}
 		}
-		result[attemptID] = view
+		if result[attemptID] == nil {
+			result[attemptID] = map[uint64]*assessments.LabView{}
+		}
+		result[attemptID][slot] = view
 	}
 	return result, rows.Err()
 }
@@ -730,7 +886,7 @@ func (r *AssessmentRepository) FinishAttempt(
 	var score, passScore float64
 	var deadline sql.NullTime
 	err = tx.QueryRowContext(ctx,
-		`SELECT t.status, t.score_awarded, v.pass_score, t.deadline_at
+		`SELECT t.status, t.score_awarded, COALESCE(t.pass_score, v.pass_score), t.deadline_at
         FROM attempts t
         JOIN assessment_access_grants g ON g.id = t.access_grant_id
         JOIN assessment_versions v ON v.id = g.assessment_version_id
@@ -820,17 +976,6 @@ func (r *AssessmentRepository) DueAttempts(ctx context.Context, now time.Time) (
 	return ids, rows.Err()
 }
 
-func (r *AssessmentRepository) AttemptLab(ctx context.Context, attemptID uint64) (uint64, error) {
-	var templateID uint64
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(q.lab_template_version_id), 0)
-        FROM attempt_questions aq
-        JOIN assessment_questions q ON q.id = aq.question_id
-        WHERE aq.attempt_id = ? AND q.pool = 'nmap'`,
-		attemptID).Scan(&templateID)
-	return templateID, err
-}
-
 func (r *AssessmentRepository) ListAttempts(
 	ctx context.Context,
 	active bool,
@@ -874,8 +1019,7 @@ func (r *AssessmentRepository) ListAttempts(
 	if err != nil {
 		return nil, err
 	}
-	labViews, err := r.labViews(ctx, ids)
-	if err != nil {
+	if err := r.attachLabs(ctx, dealt); err != nil {
 		return nil, err
 	}
 	for i := range list {
@@ -883,7 +1027,6 @@ func (r *AssessmentRepository) ListAttempts(
 		if list[i].Questions == nil {
 			list[i].Questions = []assessments.DealtQuestion{}
 		}
-		list[i].Lab = labViews[list[i].ID]
 	}
 	return list, nil
 }
@@ -899,7 +1042,7 @@ func (r *AssessmentRepository) QuestionBank(ctx context.Context) ([]assessments.
 		entry := assessments.BankAssessment{Assessment: a, Questions: []assessments.BankQuestion{}}
 
 		rows, err := r.db.QueryContext(ctx,
-			`SELECT q.id, q.code, q.pool, q.difficulty, q.prompt,
+			`SELECT q.id, q.code, q.pool, COALESCE(q.difficulty, ''), q.prompt,
                     COALESCE(q.pcap_file, ''), COALESCE(ltv.yaml_spec, ''),
                     (SELECT COALESCE(SUM(c.points), 0) FROM assessment_questions c
                      WHERE c.parent_question_id = q.id),

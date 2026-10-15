@@ -101,7 +101,7 @@ func (f *labFixture) attempt(t *testing.T, deadline time.Time) uint64 {
 
 func (f *labFixture) provision(t *testing.T, attemptID uint64) uint64 {
 	t.Helper()
-	instanceID, err := f.repo.RequestProvision(context.Background(), attemptID, f.labID)
+	instanceID, err := f.repo.RequestProvision(context.Background(), attemptID, 0, f.labID)
 	if err != nil {
 		t.Fatalf("RequestProvision() error = %v", err)
 	}
@@ -195,7 +195,7 @@ func TestRequestProvisionRefusesSecondActiveLab(t *testing.T) {
 	attemptID := f.attempt(t, inAnHour())
 	f.provision(t, attemptID)
 
-	_, err := f.repo.RequestProvision(context.Background(), attemptID, f.labID)
+	_, err := f.repo.RequestProvision(context.Background(), attemptID, 0, f.labID)
 	if !errors.Is(err, labs.ErrLabActive) {
 		t.Fatalf("RequestProvision() error = %v; want %v", err, labs.ErrLabActive)
 	}
@@ -215,7 +215,7 @@ func TestRequestProvisionSkipsReservedAndAllocatedAddresses(t *testing.T) {
 		t.Fatalf("IP = %s; want the only unreserved address", target.IP)
 	}
 
-	_, err = f.repo.RequestProvision(context.Background(), f.attempt(t, inAnHour()), f.labID)
+	_, err = f.repo.RequestProvision(context.Background(), f.attempt(t, inAnHour()), 0, f.labID)
 	if !errors.Is(err, labs.ErrNoFreeAddress) {
 		t.Fatalf("RequestProvision() error = %v; want %v", err, labs.ErrNoFreeAddress)
 	}
@@ -237,7 +237,7 @@ func TestRequestProvisionConcurrentStartsGetDistinctAddresses(t *testing.T) {
 	errs := make([]error, len(attempts))
 	for i, attemptID := range attempts {
 		wg.Go(func() {
-			_, errs[i] = f.repo.RequestProvision(context.Background(), attemptID, f.labID)
+			_, errs[i] = f.repo.RequestProvision(context.Background(), attemptID, 0, f.labID)
 		})
 	}
 	wg.Wait()
@@ -507,8 +507,78 @@ func TestRequestProvisionRespectsHostCapacity(t *testing.T) {
 	exec(t, f.db, `UPDATE docker_hosts SET max_instances = 1`)
 	f.provision(t, f.attempt(t, inAnHour()))
 
-	_, err := f.repo.RequestProvision(context.Background(), f.attempt(t, inAnHour()), f.labID)
+	_, err := f.repo.RequestProvision(context.Background(), f.attempt(t, inAnHour()), 0, f.labID)
 	if !errors.Is(err, labs.ErrNoFreeAddress) {
 		t.Fatalf("RequestProvision() error = %v; want %v once the host is full", err, labs.ErrNoFreeAddress)
+	}
+}
+
+// question adds a top-level scenario question to the fixture's version.
+func (f *labFixture) question(t *testing.T, code string) uint64 {
+	t.Helper()
+	return insertID(t, f.db,
+		`INSERT INTO assessment_questions
+        (assessment_version_id, code, prompt, answer_type, pool, lab_template_version_id, points, sequence_no)
+        VALUES (?, ?, 'Scenario', 'group', 'scenario', ?, 0, 1)`,
+		f.versionID, code, f.labID)
+}
+
+func TestEachQuestionGetsItsOwnLabAndStopEndsThemAll(t *testing.T) {
+	f := newLabFixture(t, "192.168.20.182", "192.168.20.183", "192.168.20.184")
+	ctx := context.Background()
+	attemptID := f.attempt(t, inAnHour())
+	web, ssh := f.question(t, "q-01"), f.question(t, "q-02")
+
+	first, err := f.repo.RequestProvision(ctx, attemptID, web, f.labID)
+	if err != nil {
+		t.Fatalf("RequestProvision(web) error = %v", err)
+	}
+	second, err := f.repo.RequestProvision(ctx, attemptID, ssh, f.labID)
+	if err != nil {
+		t.Fatalf("RequestProvision(ssh) error = %v; want a second lab for a second question", err)
+	}
+	if _, err := f.repo.RequestProvision(ctx, attemptID, web, f.labID); !errors.Is(err, labs.ErrLabActive) {
+		t.Fatalf("RequestProvision(web again) error = %v; want %v", err, labs.ErrLabActive)
+	}
+
+	a, _ := f.repo.LoadTarget(ctx, first)
+	b, _ := f.repo.LoadTarget(ctx, second)
+	if a.IP == b.IP {
+		t.Fatalf("both questions got %s; want an address each", a.IP)
+	}
+
+	// One container is running, the other still queued.
+	job := f.claim(t)
+	if err := f.repo.MarkProvisioning(ctx, job.InstanceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.MarkRunning(ctx, job.InstanceID, "container-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.CompleteJob(ctx, job.ID, "succeeded", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.repo.RequestStop(ctx, attemptID); err != nil {
+		t.Fatalf("RequestStop() error = %v", err)
+	}
+	queued := second
+	if job.InstanceID == second {
+		queued = first
+	}
+	if got := f.instanceStatus(t, job.InstanceID); got != "stopping" {
+		t.Fatalf("running lab after stop = %q; want stopping", got)
+	}
+	if got := f.instanceStatus(t, queued); got != "stopped" {
+		t.Fatalf("queued lab after stop = %q; want stopped without a container", got)
+	}
+	if got := f.jobStatus(t, job.InstanceID, labs.JobStop); got != "pending" {
+		t.Fatalf("stop job = %q; want pending", got)
+	}
+
+	// A restarted question gets a new generation of its own lab.
+	questionOf := map[uint64]uint64{first: web, second: ssh}
+	if _, err := f.repo.RequestProvision(ctx, attemptID, questionOf[queued], f.labID); err != nil {
+		t.Fatalf("RequestProvision() after the lab stopped error = %v", err)
 	}
 }

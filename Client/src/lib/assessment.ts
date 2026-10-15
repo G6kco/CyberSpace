@@ -1,4 +1,4 @@
-import type { AttemptSummary, LabStatus, StudentStatus } from '../types/assessment'
+import type { AssessmentInfo, AttemptSummary, DealtQuestion, LabStatus, StudentStatus } from '../types/assessment'
 
 export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 
@@ -52,4 +52,37 @@ export function eligibilityLabel(status: StudentStatus): { label: string; tone: 
   }
 }
 
-export const poolName = { wireshark: 'Wireshark', nmap: 'Nmap' } as const
+export const poolName = { wireshark: 'Wireshark', nmap: 'Nmap', scenario: 'Scenario' } as const
+
+// questionLabel names a dealt question: its pool for Level 1, its position
+// for a built level, whose questions are all scenarios.
+export function questionLabel(question: Pick<DealtQuestion, 'pool'>, index: number): string {
+  return question.pool === 'scenario' ? `Scenario ${index + 1}` : poolName[question.pool]
+}
+
+// passMarkLabel describes a level's pass mark: a percentage of the marks
+// dealt for a built level, a fixed score for Level 1.
+export function passMarkLabel(assessment: Pick<AssessmentInfo, 'passScore' | 'totalPoints' | 'passPercent'>): string {
+  return assessment.passPercent != null
+    ? `${assessment.passPercent}% of the marks dealt`
+    : `${assessment.passScore} / ${assessment.totalPoints}`
+}
+
+// labSummary sums the labs of an attempt's questions for one table cell.
+export function labSummary(questions: Pick<DealtQuestion, 'hasLab' | 'lab'>[]): { label: string; tone: Tone } | null {
+  const withLab = questions.filter((q) => q.hasLab)
+  if (withLab.length === 0) return null
+  if (withLab.length === 1) return labLabel(withLab[0].lab?.status)
+  const running = withLab.filter((q) => q.lab?.status === 'running').length
+  const failed = withLab.some((q) => q.lab?.status === 'failed')
+  return {
+    label: `${running} / ${withLab.length} running`,
+    tone: failed ? 'danger' : running === withLab.length ? 'success' : 'info',
+  }
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}

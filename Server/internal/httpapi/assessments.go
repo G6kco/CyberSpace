@@ -32,6 +32,7 @@ func registerAssessmentRoutes(protected *gin.RouterGroup, handler *assessmentHan
 	student.POST("/attempts/:attemptID/answers", handler.submit)
 	student.POST("/attempts/:attemptID/finish", handler.finish)
 	student.GET("/attempts/:attemptID/questions/:questionID/pcap", handler.pcap)
+	student.GET("/attempts/:attemptID/files/:fileID", handler.file)
 
 	admin := protected.Group("/admin", requireRole("admin"))
 	admin.GET("/lobby", handler.lobby)
@@ -42,7 +43,7 @@ func registerAssessmentRoutes(protected *gin.RouterGroup, handler *assessmentHan
 	admin.GET("/attempts/:attemptID", handler.adminAttempt)
 	admin.POST("/attempts/:attemptID/end", handler.end)
 	admin.POST("/attempts/:attemptID/revoke", handler.revoke)
-	admin.POST("/attempts/:attemptID/lab/restart", handler.restartLab)
+	admin.POST("/attempts/:attemptID/questions/:questionID/lab/restart", handler.restartLab)
 	admin.GET("/question-bank", handler.questionBank)
 	admin.GET("/students", handler.students)
 }
@@ -165,6 +166,24 @@ func (h *assessmentHandler) pcap(c *gin.Context) {
 	c.FileAttachment(path, name)
 }
 
+func (h *assessmentHandler) file(c *gin.Context) {
+	attemptID, ok := idParam(c, "attemptID")
+	if !ok {
+		return
+	}
+	fileID, ok := idParam(c, "fileID")
+	if !ok {
+		return
+	}
+	path, name, err := h.service.File(c.Request.Context(), currentUser(c).ID, attemptID, fileID)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.FileAttachment(path, name)
+}
+
 // ---- Administrator ---------------------------------------------------------
 
 func (h *assessmentHandler) lobby(c *gin.Context) {
@@ -242,7 +261,11 @@ func (h *assessmentHandler) restartLab(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RestartLab(c.Request.Context(), actorOf(c), attemptID); err != nil {
+	questionID, ok := idParam(c, "questionID")
+	if !ok {
+		return
+	}
+	if err := h.service.RestartLab(c.Request.Context(), actorOf(c), attemptID, questionID); err != nil {
 		h.fail(c, err)
 		return
 	}

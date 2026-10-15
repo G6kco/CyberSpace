@@ -1,7 +1,8 @@
 // Package assessments runs level assessments: a student enters the test
 // portal, an administrator takes attendance and starts the test, each
-// student is dealt one question per pool and gets a lab, submits flags, and
-// the attempt is scored when submitted, ended, or out of time.
+// student is dealt questions and gets a lab for each question that has one,
+// submits flags, and the attempt is scored when submitted, ended, or out of
+// time.
 package assessments
 
 import (
@@ -30,8 +31,8 @@ var (
 	ErrTooManySubmissions = errors.New("too many submissions")
 	// ErrInvalidInput means the request itself is malformed.
 	ErrInvalidInput = errors.New("invalid input")
-	// ErrNoLab means the attempt has no Nmap question to provision a lab for.
-	ErrNoLab = errors.New("attempt has no lab")
+	// ErrNoLab means the question was not dealt to the attempt or has no lab.
+	ErrNoLab = errors.New("question has no lab")
 	// ErrLabActive means the attempt's lab is still running or starting.
 	ErrLabActive = errors.New("lab is still active")
 )
@@ -45,8 +46,13 @@ const (
 	StatusUnavailable = "unavailable"
 )
 
-// Pools a level deals one question from each.
+// Pools Level 1 deals one question from each. A level built by an
+// administrator instead deals Assessment.QuestionsPerAttempt questions from
+// its single PoolScenario bank.
 var Pools = []string{"wireshark", "nmap"}
+
+// PoolScenario is the pool of every question in a built level.
+const PoolScenario = "scenario"
 
 // Assessment is the published assessment of one level.
 type Assessment struct {
@@ -60,6 +66,11 @@ type Assessment struct {
 	PassScore       float64 `json:"passScore"`
 	TotalPoints     float64 `json:"totalPoints"`
 	Instructions    string  `json:"instructions"`
+	// QuestionsPerAttempt and PassPercent are set for a built level: the
+	// maximum then depends on the questions dealt, and the pass mark is a
+	// percentage of it. TotalPoints is the highest possible maximum.
+	QuestionsPerAttempt int      `json:"questionsPerAttempt,omitempty"`
+	PassPercent         *float64 `json:"passPercent"`
 }
 
 // StudentState is what storage knows about a student's assessment record.
@@ -107,7 +118,6 @@ type Overview struct {
 type AttemptView struct {
 	AttemptSummary
 	Questions  []DealtQuestion `json:"questions"`
-	Lab        *LabView        `json:"lab"`
 	ServerTime time.Time       `json:"serverTime"`
 }
 
@@ -123,8 +133,21 @@ type DealtQuestion struct {
 	PcapFile   string     `json:"-"`
 	HasPcap    bool       `json:"hasPcap"`
 	Flags      []FlagView `json:"flags"`
-	// LabTemplateVersionID is the Nmap image's lab, or zero.
+	Files      []FileView `json:"files"`
+	// HasLab reports that the question has its own container; Lab is that
+	// container's newest state, nil until one is requested.
+	HasLab bool     `json:"hasLab"`
+	Lab    *LabView `json:"lab"`
+	// LabTemplateVersionID is the question's lab, or zero.
 	LabTemplateVersionID uint64 `json:"-"`
+}
+
+// FileView is a file a student downloads for a question.
+type FileView struct {
+	ID         uint64 `json:"id"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	StoredName string `json:"-"`
 }
 
 // FlagView is one answer slot; it never carries the expected answer.
@@ -167,9 +190,15 @@ type StartRequest struct {
 	Now             time.Time
 }
 
-// Started is a committed attempt and the lab it needs, if any.
+// Started is a committed attempt and the labs its questions need.
 type Started struct {
-	AttemptID            uint64
+	AttemptID uint64
+	Labs      []QuestionLab
+}
+
+// QuestionLab is the lab one dealt question needs.
+type QuestionLab struct {
+	QuestionID           uint64
 	LabTemplateVersionID uint64
 }
 
@@ -198,7 +227,6 @@ type LobbyEntry struct {
 type AdminAttempt struct {
 	AttemptSummary
 	Student   Student         `json:"student"`
-	Lab       *LabView        `json:"lab"`
 	Questions []DealtQuestion `json:"questions"`
 }
 
@@ -265,7 +293,6 @@ type Repository interface {
 	SubmitAnswer(ctx context.Context, attemptID, userID, flagID uint64, digest [32]byte, now time.Time) (SubmitResult, error)
 	FinishAttempt(ctx context.Context, attemptID, actorID uint64, mode, reason string, now time.Time) (AttemptSummary, error)
 	DueAttempts(ctx context.Context, now time.Time) ([]uint64, error)
-	AttemptLab(ctx context.Context, attemptID uint64) (uint64, error)
 
 	ListAttempts(ctx context.Context, active bool, limit int) ([]AdminAttempt, error)
 	QuestionBank(ctx context.Context) ([]BankAssessment, error)
@@ -275,6 +302,6 @@ type Repository interface {
 
 // Labs is the lab engine's request side.
 type Labs interface {
-	RequestProvision(ctx context.Context, attemptID, templateVersionID uint64) (uint64, error)
+	RequestProvision(ctx context.Context, attemptID, questionID, templateVersionID uint64) (uint64, error)
 	RequestStop(ctx context.Context, attemptID uint64) error
 }

@@ -7,7 +7,7 @@ import { ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useToast } from '../../components/ui/Toast'
 import { useNow, usePolling } from '../../hooks/usePolling'
-import { attemptOutcome, formatCountdown, labLabel, poolName, remainingMs, serverOffset } from '../../lib/assessment'
+import { attemptOutcome, formatBytes, formatCountdown, labLabel, questionLabel, remainingMs, serverOffset } from '../../lib/assessment'
 import { formatDateTime } from '../../lib/format'
 import { ApiError, errorMessage } from '../../services/api'
 import { studentApi } from '../../services/assessments'
@@ -57,7 +57,7 @@ export function AssessmentWorkspacePage() {
         </Link>
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
           <AlertTriangle className="h-4 w-4" />
-          Scan only the target IP you are given
+          Attack only the target IPs you are given
         </div>
       </div>
 
@@ -82,12 +82,12 @@ export function AssessmentWorkspacePage() {
       {error && <p role="status" className="text-sm text-warning">Connection problem: {error} Retrying…</p>}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {questions.map((question) => (
+        {questions.map((question, index) => (
           <QuestionCard
             key={question.id}
             attemptId={attempt.id}
             question={question}
-            lab={question.pool === 'nmap' ? attempt.lab : null}
+            label={questionLabel(question, index)}
             onChange={refresh}
           />
         ))}
@@ -132,14 +132,14 @@ function Stat({ label, value, detail }: { label: string; value: string; detail: 
   )
 }
 
-function QuestionCard({ attemptId, question, lab, onChange }: { attemptId: number; question: DealtQuestion; lab: LabView | null; onChange: () => Promise<void> }) {
+function QuestionCard({ attemptId, question, label, onChange }: { attemptId: number; question: DealtQuestion; label: string; onChange: () => Promise<void> }) {
   return (
-    <section className="surface flex flex-col" aria-label={`${poolName[question.pool]} question`}>
+    <section className="surface flex flex-col" aria-label={`${label} question`}>
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-4 sm:p-5">
         <div className="flex items-center gap-2">
           {question.pool === 'wireshark' ? <Network className="h-5 w-5 text-primary" /> : <Server className="h-5 w-5 text-primary" />}
-          <h3 className="font-semibold text-strong">{poolName[question.pool]}</h3>
-          <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>
+          <h3 className="font-semibold text-strong">{label}</h3>
+          {question.difficulty && <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>}
         </div>
         <span className="text-sm font-medium text-secondary">
           {question.score} / {question.points} points
@@ -157,11 +157,27 @@ function QuestionCard({ attemptId, question, lab, onChange }: { attemptId: numbe
             Download capture file
           </a>
         )}
-        {question.pool === 'nmap' && <TargetPanel lab={lab} />}
+        {question.files.length > 0 && (
+          <ul className="flex flex-wrap gap-2" aria-label="Files">
+            {question.files.map((file) => (
+              <li key={file.id}>
+                <a
+                  href={studentApi.fileUrl(attemptId, file.id)}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border px-3.5 text-sm font-semibold text-strong hover:bg-subtle"
+                >
+                  <Download className="h-4 w-4" />
+                  {file.name}
+                  <span className="font-normal text-secondary">{formatBytes(file.size)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {question.hasLab && <TargetPanel lab={question.lab} />}
 
         <div className="space-y-3">
           {question.flags.map((flag, index) => (
-            <FlagForm key={flag.id} attemptId={attemptId} flag={flag} index={index} onChange={onChange} />
+            <FlagForm key={flag.id} attemptId={attemptId} flag={flag} label={question.pool === 'scenario' ? `Answer ${index + 1}` : index === 0 ? 'Flag' : `Q${index}`} onChange={onChange} />
           ))}
         </div>
       </div>
@@ -187,7 +203,7 @@ function TargetPanel({ lab }: { lab: LabView | null }) {
   )
 }
 
-function FlagForm({ attemptId, flag, index, onChange }: { attemptId: number; flag: FlagSlot; index: number; onChange: () => Promise<void> }) {
+function FlagForm({ attemptId, flag, label, onChange }: { attemptId: number; flag: FlagSlot; label: string; onChange: () => Promise<void> }) {
   const [answer, setAnswer] = useState('')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null)
@@ -217,7 +233,7 @@ function FlagForm({ attemptId, flag, index, onChange }: { attemptId: number; fla
     <form onSubmit={submit} className={`rounded-lg border p-3 ${flag.solved ? 'border-emerald-200 bg-emerald-50' : 'border-border'}`}>
       <div className="flex items-start justify-between gap-3">
         <label htmlFor={inputId} className="text-sm font-medium text-strong">
-          {index === 0 ? 'Flag' : `Q${index}`}: {flag.prompt}
+          {label}: {flag.prompt}
         </label>
         <span className="shrink-0 text-xs font-semibold text-secondary">{flag.points} pts</span>
       </div>

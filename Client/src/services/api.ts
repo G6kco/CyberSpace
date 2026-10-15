@@ -14,7 +14,9 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  // A FormData body is sent as multipart/form-data (file uploads); anything
+  // else is sent as JSON.
   body?: unknown
 }
 
@@ -22,11 +24,13 @@ interface RequestOptions {
 // Origin header to these cross-origin requests, which the server requires
 // for anything that changes state.
 export async function apiRequest<T>(path: string, { method = 'GET', body }: RequestOptions = {}): Promise<T> {
+  const form = body instanceof FormData
   const response = await fetch(`${apiBase}${path}`, {
     method,
     credentials: 'include',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    // The browser sets the multipart boundary itself.
+    headers: body === undefined || form ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : form ? body : JSON.stringify(body),
   })
 
   if (!response.ok) {

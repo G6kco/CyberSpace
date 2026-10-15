@@ -14,8 +14,10 @@ const liveAttempt = {
   id: 7, level: 'Level 1', title: 'Level 1 Practical', status: 'in_progress', result: 'pending', score: 50, maxScore: 100, passScore: 80,
   startedAt: new Date().toISOString(), deadlineAt: new Date(Date.now() + 3000000).toISOString(), endedAt: null,
   student: { id: '01STUDENT', name: 'Nila Joseph', email: 'nila@bitsathy.ac.in', registerNumber: '7376241CS101', status: 'active' },
-  lab: { status: 'running', ip: '192.168.20.182' },
-  questions: [{ id: 11, code: 'wireshark-02', pool: 'wireshark', difficulty: 'hard', prompt: '', points: 50, score: 50, hasPcap: false, flags: [] }],
+  questions: [
+    { id: 11, code: 'wireshark-02', pool: 'wireshark', difficulty: 'hard', prompt: '', points: 50, score: 50, hasPcap: false, flags: [], files: [], hasLab: false, lab: null },
+    { id: 21, code: 'nmap-01', pool: 'nmap', difficulty: 'easy', prompt: '', points: 50, score: 0, hasPcap: false, flags: [], files: [], hasLab: true, lab: { status: 'running', ip: '192.168.20.182' } },
+  ],
 }
 
 describe('administrator monitoring', () => {
@@ -83,5 +85,35 @@ describe('administrator monitoring', () => {
 
     expect(await screen.findByText('Attempt revoked.')).toBeInTheDocument()
     expect(apiCalls('POST', '/api/v1/admin/attempts/7/revoke')[0].body).toEqual({ reason: 'Used a phone' })
+  })
+
+  it('restarts the lab of one question from the attempt details', async () => {
+    const user = userEvent.setup()
+    const failed = {
+      ...liveAttempt,
+      serverTime: new Date().toISOString(),
+      questions: [
+        { ...liveAttempt.questions[0], prompt: 'Find it.' },
+        { id: 31, code: 'q-01', pool: 'scenario', difficulty: '', prompt: 'Web app.', points: 25, score: 0, hasPcap: false, flags: [], files: [], hasLab: true, lab: { status: 'failed' } },
+      ],
+    }
+    mockApi('GET', '/api/v1/admin/lobby', { students: [] })
+    mockApi('GET', '/api/v1/admin/attempts?scope=active', { attempts: [liveAttempt] })
+    mockApi('GET', '/api/v1/admin/attempts/7', failed)
+    mockApi('POST', '/api/v1/admin/attempts/7/questions/31/lab/restart', undefined)
+    renderApp('/admin/monitoring')
+
+    await user.click(await screen.findByRole('tab', { name: /Live attempts/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Inspect attempt' }))
+    const drawer = await screen.findByRole('dialog')
+    // Only the failed lab offers a restart.
+    const restart = within(drawer).getAllByRole('button', { name: /Restart lab/ })
+    expect(restart).toHaveLength(1)
+    await user.click(restart[0])
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Restart the lab?' })).getByRole('button', { name: 'Restart lab' }))
+
+    expect(await screen.findByText('Lab restart queued.')).toBeInTheDocument()
+    expect(apiCalls('POST', '/api/v1/admin/attempts/7/questions/31/lab/restart')).toHaveLength(1)
   })
 })

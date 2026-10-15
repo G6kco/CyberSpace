@@ -22,6 +22,7 @@ export const studentApi = {
   // A plain link: the browser downloads the file with the session cookie.
   pcapUrl: (attemptId: number, questionId: number) =>
     `${apiBase}/api/v1/student/attempts/${attemptId}/questions/${questionId}/pcap`,
+  fileUrl: (attemptId: number, fileId: number) => `${apiBase}/api/v1/student/attempts/${attemptId}/files/${fileId}`,
 }
 
 export const adminApi = {
@@ -38,7 +39,8 @@ export const adminApi = {
   end: (attemptId: number) => apiRequest<AttemptSummary>(`/api/v1/admin/attempts/${attemptId}/end`, { method: 'POST' }),
   revoke: (attemptId: number, reason: string) =>
     apiRequest<AttemptSummary>(`/api/v1/admin/attempts/${attemptId}/revoke`, { method: 'POST', body: { reason } }),
-  restartLab: (attemptId: number) => apiRequest<void>(`/api/v1/admin/attempts/${attemptId}/lab/restart`, { method: 'POST' }),
+  restartLab: (attemptId: number, questionId: number) =>
+    apiRequest<void>(`/api/v1/admin/attempts/${attemptId}/questions/${questionId}/lab/restart`, { method: 'POST' }),
   questionBank: () => apiRequest<{ assessments: BankAssessment[] }>('/api/v1/admin/question-bank').then((r) => r.assessments),
   students: (search: string) =>
     apiRequest<{ students: StudentRecord[] }>(`/api/v1/admin/students?search=${encodeURIComponent(search)}`).then((r) => r.students),

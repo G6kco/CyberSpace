@@ -9,7 +9,7 @@ import { SearchInput } from '../../components/ui/SearchInput'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useToast } from '../../components/ui/Toast'
 import { useNow, usePolling } from '../../hooks/usePolling'
-import { attemptOutcome, eligibilityLabel, formatCountdown, labLabel, poolName } from '../../lib/assessment'
+import { attemptOutcome, eligibilityLabel, formatCountdown, labLabel, labSummary, questionLabel } from '../../lib/assessment'
 import { formatDateTime } from '../../lib/format'
 import { errorMessage } from '../../services/api'
 import { adminApi } from '../../services/assessments'
@@ -216,7 +216,7 @@ function LobbyPanel() {
       <ConfirmDialog
         open={confirmStart}
         title="Start the test?"
-        description={`${toStart.length} student(s) will each be dealt one Wireshark and one Nmap question, their lab will start, and their one-hour timer begins now.`}
+        description={`${toStart.length} student(s) will each be dealt their level's questions, a lab will start for every question that has one, and their timer begins now.`}
         confirmLabel="Start test"
         onCancel={cancelStart}
         onConfirm={async () => {
@@ -236,7 +236,9 @@ function LobbyPanel() {
 
 // ---- Attempts --------------------------------------------------------------
 
-type PendingAction = { kind: 'end' | 'revoke' | 'lab'; attempt: AdminAttempt }
+type PendingAction =
+  | { kind: 'end' | 'revoke'; attempt: Pick<AdminAttempt, 'id' | 'score'>; student: string }
+  | { kind: 'lab'; attempt: Pick<AdminAttempt, 'id' | 'score'>; student: string; questionId: number; question: string }
 
 function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
   const load = useMemo(() => () => adminApi.attempts(scope), [scope])
@@ -270,8 +272,9 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
     try {
       if (kind === 'end') await adminApi.end(attempt.id)
       if (kind === 'revoke') await adminApi.revoke(attempt.id, reason ?? '')
-      if (kind === 'lab') await adminApi.restartLab(attempt.id)
+      if (pending.kind === 'lab') await adminApi.restartLab(attempt.id, pending.questionId)
       notify(kind === 'end' ? 'Attempt ended and scored.' : kind === 'revoke' ? 'Attempt revoked.' : 'Lab restart queued.')
+      if (pending.kind === 'lab' && inspected) setInspected(await adminApi.attempt(inspected.id))
     } catch (err) {
       notify(errorMessage(err), 'error')
     } finally {
@@ -314,7 +317,7 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
               </thead>
               <tbody className="divide-y divide-border">
                 {attempts.map((attempt) => {
-                  const lab = labLabel(attempt.lab?.status)
+                  const lab = labSummary(attempt.questions)
                   const outcome = attemptOutcome(attempt)
                   const active = attempt.status === 'in_progress'
                   const left = attempt.deadlineAt ? Math.max(0, new Date(attempt.deadlineAt).getTime() - now) : 0
@@ -325,15 +328,17 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
                         <p className="text-xs text-secondary">{attempt.student.registerNumber || attempt.student.email} · {attempt.level}</p>
                       </td>
                       <td className="py-3 text-secondary">
-                        {attempt.questions.map((q) => (
+                        {attempt.questions.map((q, index) => (
                           <p key={q.id}>
-                            {poolName[q.pool]} <span className="font-mono text-xs">{q.code}</span> · {q.score}/{q.points}
+                            {questionLabel(q, index)} <span className="font-mono text-xs">{q.code}</span> · {q.score}/{q.points}
                           </p>
                         ))}
                       </td>
                       <td className="py-3">
-                        <StatusBadge tone={lab.tone}>{lab.label}</StatusBadge>
-                        {attempt.lab?.ip && <p className="mt-1 font-mono text-xs text-secondary">{attempt.lab.ip}</p>}
+                        {lab ? <StatusBadge tone={lab.tone}>{lab.label}</StatusBadge> : <span className="text-muted">—</span>}
+                        {attempt.questions.filter((q) => q.lab?.ip).map((q) => (
+                          <p key={q.id} className="mt-1 font-mono text-xs text-secondary">{q.lab?.ip}</p>
+                        ))}
                       </td>
                       <td className="py-3 font-medium text-strong">{attempt.status === 'revoked' ? '—' : `${attempt.score} / ${attempt.maxScore}`}</td>
                       <td className="py-3">
@@ -352,9 +357,8 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
                           {(close) => (
                             <>
                               <DropdownItem onClick={() => { void inspect(attempt); close() }}><Eye className="h-4 w-4" />Inspect attempt</DropdownItem>
-                              {active && <DropdownItem onClick={() => { setPending({ kind: 'lab', attempt }); close() }}><RotateCcw className="h-4 w-4" />Restart lab</DropdownItem>}
-                              {active && <DropdownItem onClick={() => { setPending({ kind: 'end', attempt }); close() }}><Square className="h-4 w-4" />End and score</DropdownItem>}
-                              {active && <DropdownItem danger onClick={() => { setPending({ kind: 'revoke', attempt }); close() }}><Ban className="h-4 w-4" />Revoke attempt</DropdownItem>}
+                              {active && <DropdownItem onClick={() => { setPending({ kind: 'end', attempt, student: attempt.student.name }); close() }}><Square className="h-4 w-4" />End and score</DropdownItem>}
+                              {active && <DropdownItem danger onClick={() => { setPending({ kind: 'revoke', attempt, student: attempt.student.name }); close() }}><Ban className="h-4 w-4" />Revoke attempt</DropdownItem>}
                             </>
                           )}
                         </DropdownMenu>
@@ -373,10 +377,12 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
         title={pending?.kind === 'end' ? 'End this attempt?' : pending?.kind === 'revoke' ? 'Revoke this attempt?' : 'Restart the lab?'}
         description={
           pending?.kind === 'end'
-            ? `${pending.attempt.student.name}'s attempt will be scored now with ${pending.attempt.score} points and the lab stopped.`
+            ? `${pending.student}'s attempt will be scored now with ${pending.attempt.score} points and its labs stopped.`
             : pending?.kind === 'revoke'
-              ? `${pending.attempt.student.name}'s attempt will be closed without a score and counts as not passed. The reason is recorded and shown to the student.`
-              : `A fresh lab will be queued for ${pending?.attempt.student.name ?? ''}. Only possible when the current lab has failed or stopped.`
+              ? `${pending.student}'s attempt will be closed without a score and counts as not passed. The reason is recorded and shown to the student.`
+              : pending?.kind === 'lab'
+                ? `A fresh lab for ${pending.question} will be queued for ${pending.student}. Only possible when that lab has failed or stopped.`
+                : ''
         }
         confirmLabel={pending?.kind === 'end' ? 'End and score' : pending?.kind === 'revoke' ? 'Revoke attempt' : 'Restart lab'}
         tone={pending?.kind === 'lab' ? 'primary' : 'danger'}
@@ -386,15 +392,22 @@ function AttemptsPanel({ scope }: { scope: 'active' | 'recent' }) {
       />
 
       <Drawer open={Boolean(inspected)} title={inspected ? `Attempt #${inspected.id}` : ''} onClose={closeInspected}>
-        {inspected && <AttemptDetails attempt={inspected} />}
+        {inspected && (
+          <AttemptDetails
+            attempt={inspected}
+            onRestartLab={(questionId, question) =>
+              setPending({ kind: 'lab', attempt: inspected, student: `attempt #${inspected.id}`, questionId, question })
+            }
+          />
+        )}
       </Drawer>
     </section>
   )
 }
 
-function AttemptDetails({ attempt }: { attempt: AttemptView }) {
+function AttemptDetails({ attempt, onRestartLab }: { attempt: AttemptView; onRestartLab: (questionId: number, question: string) => void }) {
   const outcome = attemptOutcome(attempt)
-  const lab = labLabel(attempt.lab?.status)
+  const active = attempt.status === 'in_progress'
   return (
     <div className="space-y-5 text-sm">
       <dl className="grid grid-cols-2 gap-3 rounded-lg bg-app p-4">
@@ -402,15 +415,26 @@ function AttemptDetails({ attempt }: { attempt: AttemptView }) {
         <Detail label="Score" value={`${attempt.score} / ${attempt.maxScore} (pass ${attempt.passScore})`} />
         <Detail label="Started" value={formatDateTime(attempt.startedAt ?? undefined)} />
         <Detail label="Deadline" value={formatDateTime(attempt.deadlineAt ?? undefined)} />
-        <Detail label="Lab" value={<><StatusBadge tone={lab.tone}>{lab.label}</StatusBadge>{attempt.lab?.ip && <span className="ml-2 font-mono">{attempt.lab.ip}</span>}</>} />
         <Detail label="Ended" value={formatDateTime(attempt.endedAt ?? undefined)} />
       </dl>
       {attempt.reason && <p className="rounded-lg bg-app p-3 text-secondary">{attempt.reason}</p>}
-      {(attempt.questions ?? []).map((q) => (
+      {(attempt.questions ?? []).map((q, index) => (
         <section key={q.id} className="rounded-lg border border-border p-4">
           <h3 className="font-semibold text-strong">
-            {poolName[q.pool]} · <span className="font-mono text-xs">{q.code}</span> · {q.difficulty}
+            {questionLabel(q, index)} · <span className="font-mono text-xs">{q.code}</span>{q.difficulty && ` · ${q.difficulty}`}
           </h3>
+          {q.hasLab && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone={labLabel(q.lab?.status).tone}>Lab {labLabel(q.lab?.status).label.toLowerCase()}</StatusBadge>
+              {q.lab?.ip && <span className="font-mono">{q.lab.ip}</span>}
+              {active && (q.lab?.status === 'failed' || q.lab?.status === 'stopped' || !q.lab) && (
+                <Button variant="secondary" className="ml-auto" onClick={() => onRestartLab(q.id, questionLabel(q, index))}>
+                  <RotateCcw className="h-4 w-4" />
+                  Restart lab
+                </Button>
+              )}
+            </div>
+          )}
           <ul className="mt-3 space-y-2">
             {q.flags.map((f) => (
               <li key={f.id} className="flex items-start justify-between gap-3">

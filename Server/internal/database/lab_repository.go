@@ -38,10 +38,10 @@ func NewLabRepository(db *sql.DB) *LabRepository {
 
 func (r *LabRepository) RequestProvision(
 	ctx context.Context,
-	attemptID, templateVersionID uint64,
+	attemptID, questionID, templateVersionID uint64,
 ) (uint64, error) {
 	for try := 1; ; try++ {
-		instanceID, err := r.requestProvision(ctx, attemptID, templateVersionID)
+		instanceID, err := r.requestProvision(ctx, attemptID, questionID, templateVersionID)
 		if err == nil || try == provisionRetries || !isDeadlock(err) {
 			return instanceID, err
 		}
@@ -50,7 +50,7 @@ func (r *LabRepository) RequestProvision(
 
 func (r *LabRepository) requestProvision(
 	ctx context.Context,
-	attemptID, templateVersionID uint64,
+	attemptID, questionID, templateVersionID uint64,
 ) (uint64, error) {
 	// READ COMMITTED, so each read below sees allocations committed by the
 	// starts that held the host lock before this one.
@@ -75,7 +75,7 @@ func (r *LabRepository) requestProvision(
 		return 0, err
 	}
 
-	// One active lab per attempt is left to uq_lab_instances_one_active
+	// One active lab per question is left to uq_lab_instances_active_slot
 	// rather than checked with a locking read: locking a row that does not
 	// exist takes a gap lock, and concurrent starts then deadlock on insert.
 	var addressID, hostID uint64
@@ -106,24 +106,28 @@ func (r *LabRepository) requestProvision(
 		return 0, err
 	}
 
+	var question any
+	if questionID != 0 {
+		question = questionID
+	}
 	var generation uint64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(generation_no), 0) + 1
         FROM lab_instances
-        WHERE attempt_id = ?`,
-		attemptID,
+        WHERE attempt_id = ? AND lab_slot = ?`,
+		attemptID, questionID,
 	).Scan(&generation); err != nil {
 		return 0, err
 	}
 
 	result, err := tx.ExecContext(ctx,
 		`INSERT INTO lab_instances
-        (attempt_id, lab_template_version_id, docker_host_id, generation_no,
-         status, created_at)
-        VALUES (?, ?, ?, ?, 'queued', UTC_TIMESTAMP(6))`,
-		attemptID, templateVersionID, hostID, generation,
+        (attempt_id, question_id, lab_template_version_id, docker_host_id,
+         generation_no, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'queued', UTC_TIMESTAMP(6))`,
+		attemptID, question, templateVersionID, hostID, generation,
 	)
-	if isDuplicate(err, "uq_lab_instances_one_active") {
+	if isDuplicate(err, "uq_lab_instances_active_slot") {
 		return 0, labs.ErrLabActive
 	}
 	instanceID, err := insertedID(result, err)
@@ -169,19 +173,41 @@ func (r *LabRepository) RequestStop(ctx context.Context, attemptID uint64) error
 	}
 	defer tx.Rollback()
 
-	var instanceID uint64
-	var status string
-	err = tx.QueryRowContext(ctx,
-		`SELECT id, status FROM lab_instances WHERE active_attempt_id = ? FOR UPDATE`,
-		attemptID,
-	).Scan(&instanceID, &status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	type active struct {
+		id     uint64
+		status string
 	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, status FROM lab_instances WHERE active_attempt_id = ? ORDER BY id FOR UPDATE`,
+		attemptID,
+	)
 	if err != nil {
 		return err
 	}
+	var instances []active
+	for rows.Next() {
+		var a active
+		if err := rows.Scan(&a.id, &a.status); err != nil {
+			rows.Close()
+			return err
+		}
+		instances = append(instances, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
+	for _, a := range instances {
+		if err := stopInstance(ctx, tx, a.id, a.status); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// stopInstance withdraws or queues the removal of one active lab.
+func stopInstance(ctx context.Context, tx *sql.Tx, instanceID uint64, status string) error {
 	// A provision job no worker has claimed yet is simply withdrawn.
 	withdrawn, err := tx.ExecContext(ctx,
 		`UPDATE orchestration_jobs
@@ -196,10 +222,7 @@ func (r *LabRepository) RequestStop(ctx context.Context, attemptID uint64) error
 	// A queued lab whose job was withdrawn never had a container, so it is
 	// finished here; anything further along needs a stop job to remove one.
 	if n, _ := withdrawn.RowsAffected(); status == "queued" && n > 0 {
-		if err := finishInstance(ctx, tx, instanceID, "stopped", "removed", nil); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return finishInstance(ctx, tx, instanceID, "stopped", "removed", nil)
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -213,7 +236,7 @@ func (r *LabRepository) RequestStop(ctx context.Context, attemptID uint64) error
 	// it is reset so a stop that failed while Docker was down runs again.
 	// MySQL evaluates the assignments left to right, so status is set last
 	// for the others to see its old value.
-	if _, err := tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO orchestration_jobs
         (lab_instance_id, job_type, status, idempotency_key, available_at, created_at)
         VALUES (?, ?, 'pending', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
@@ -225,11 +248,8 @@ func (r *LabRepository) RequestStop(ctx context.Context, attemptID uint64) error
             locked_by = IF(status = 'failed', NULL, locked_by),
             status = IF(status = 'failed', 'pending', status)`,
 		instanceID, labs.JobStop, jobKey(labs.JobStop, instanceID),
-	); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	)
+	return err
 }
 
 func (r *LabRepository) ClaimJob(
@@ -471,7 +491,7 @@ func (r *LabRepository) MarkStopped(ctx context.Context, instanceID uint64) erro
 
 func (r *LabRepository) ExpiredAttempts(ctx context.Context) ([]uint64, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT li.attempt_id
+		`SELECT DISTINCT li.attempt_id
         FROM lab_instances li
         JOIN attempts a ON a.id = li.attempt_id
         WHERE li.active_attempt_id IS NOT NULL

@@ -8,6 +8,7 @@ import (
 	"github.com/G6kco/CyberSpace/internal/assessments"
 	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/G6kco/CyberSpace/internal/config"
+	"github.com/G6kco/CyberSpace/internal/levels"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +27,8 @@ type App struct {
 	Auth   *auth.GoogleLogin
 	// Assessments is set by main once the answer key and lab engine exist.
 	Assessments *assessments.Service
+	// Levels is the administrators' level builder, set by main.
+	Levels *levels.Service
 }
 
 // New creates a dependency container and rejects incomplete startup wiring.

@@ -26,17 +26,22 @@ var assessmentKey = bytes.Repeat([]byte("a"), evaluation.MinKeyLength)
 type fakeLabs struct {
 	mu         sync.Mutex
 	provisions map[uint64]uint64 // attempt -> lab template version
+	questions  map[uint64][]uint64
 	stops      []uint64
 	provErr    error
 }
 
-func (f *fakeLabs) RequestProvision(_ context.Context, attemptID, templateID uint64) (uint64, error) {
+func (f *fakeLabs) RequestProvision(_ context.Context, attemptID, questionID, templateID uint64) (uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.provErr != nil {
 		return 0, f.provErr
 	}
 	f.provisions[attemptID] = templateID
+	if f.questions == nil {
+		f.questions = map[uint64][]uint64{}
+	}
+	f.questions[attemptID] = append(f.questions[attemptID], questionID)
 	return 1, nil
 }
 
@@ -418,8 +423,8 @@ func TestFinishFailingAttemptStartsCooldown(t *testing.T) {
 	}
 
 	view, _ := f.service.Attempt(ctx, userID, attemptID)
-	if view.Questions != nil || view.Lab != nil {
-		t.Fatalf("finished attempt still shows questions or lab: %+v", view)
+	if view.Questions != nil {
+		t.Fatalf("finished attempt still shows questions or labs: %+v", view)
 	}
 
 	overview, _ := f.service.Overview(ctx, userID)
@@ -558,14 +563,19 @@ func TestRestartLabAndAdminViews(t *testing.T) {
 	f := newFlowFixture(t)
 	ctx := context.Background()
 	userID, attemptID := f.started(t, "nia")
+	nmap := f.dealt(t, userID, attemptID, "nmap")
+	wireshark := f.dealt(t, userID, attemptID, "wireshark")
 
 	f.labs.provErr = labs.ErrLabActive
-	if err := f.service.RestartLab(ctx, f.admin, attemptID); !errors.Is(err, assessments.ErrLabActive) {
+	if err := f.service.RestartLab(ctx, f.admin, attemptID, nmap.ID); !errors.Is(err, assessments.ErrLabActive) {
 		t.Fatalf("RestartLab() while active error = %v; want ErrLabActive", err)
 	}
 	f.labs.provErr = nil
-	if err := f.service.RestartLab(ctx, f.admin, attemptID); err != nil {
+	if err := f.service.RestartLab(ctx, f.admin, attemptID, nmap.ID); err != nil {
 		t.Fatalf("RestartLab() error = %v", err)
+	}
+	if err := f.service.RestartLab(ctx, f.admin, attemptID, wireshark.ID); !errors.Is(err, assessments.ErrNoLab) {
+		t.Fatalf("RestartLab(question without a lab) error = %v; want ErrNoLab", err)
 	}
 
 	active, err := f.service.Attempts(ctx, true)

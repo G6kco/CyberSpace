@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberSpace Program Flows</title>
+<style>
+:root{
+  --bg:#f7f7f5; --surface:#ffffff; --surface-2:#f0f0ec; --text:#1d1d1b; --muted:#66665f; --border:#dcdcd5;
+  --accent:#2f5bd3; --accent-soft:#e6ecfb;
+  --read:#1f7a4d; --read-bg:#e3f4ea; --write:#b3361f; --write-bg:#fbe7e2;
+  --ext:#7a4fc4; --ext-bg:#efe8fb; --mem:#8a6a00; --mem-bg:#fbf2d2; --tx:#2f5bd3; --tx-bg:#e6ecfb;
+  --err:#9a4a00; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141413; --surface:#1d1d1b; --surface-2:#262624; --text:#ececE6; --muted:#a3a39b; --border:#36362f;
+    --accent:#8aa8ff; --accent-soft:#232b44;
+    --read:#6fd39d; --read-bg:#163225; --write:#ff8f78; --write-bg:#3a1d17;
+    --ext:#c1a3ff; --ext-bg:#2b2142; --mem:#f0cd5a; --mem-bg:#352c10; --tx:#8aa8ff; --tx-bg:#232b44; --err:#ffb36b;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141413; --surface:#1d1d1b; --surface-2:#262624; --text:#ececE6; --muted:#a3a39b; --border:#36362f;
+  --accent:#8aa8ff; --accent-soft:#232b44;
+  --read:#6fd39d; --read-bg:#163225; --write:#ff8f78; --write-bg:#3a1d17;
+  --ext:#c1a3ff; --ext-bg:#2b2142; --mem:#f0cd5a; --mem-bg:#352c10; --tx:#8aa8ff; --tx-bg:#232b44; --err:#ffb36b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:28px 16px 8px;max-width:1100px;margin:0 auto}
+h1{margin:0 0 4px;font-size:26px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
+nav{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--border)}
+nav .inner{max-width:1100px;margin:0 auto;padding:0 16px;display:flex;gap:4px;overflow-x:auto}
+nav button{border:0;background:none;color:var(--muted);font:inherit;font-weight:600;padding:12px 12px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
+nav button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+section.panel{display:none}
+section.panel.active{display:block}
+h2{font-size:21px;margin:8px 0 6px}
+h3{font-size:16px;margin:0}
+.lede{color:var(--muted);margin:0 0 18px;max-width:75ch}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin:0 0 14px;overflow:hidden}
+.card > summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px}
+.card > summary::-webkit-details-marker{display:none}
+.card > summary::before{content:"▸";color:var(--muted);transition:transform .15s}
+.card[open] > summary::before{transform:rotate(90deg)}
+.route{font-family:var(--mono);font-size:13px;background:var(--surface-2);padding:2px 7px;border-radius:5px;color:var(--text)}
+.file{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
+.body{padding:4px 14px 14px;border-top:1px solid var(--border)}
+.body > p{margin:10px 0;color:var(--muted)}
+.tree{font-family:var(--mono);font-size:13px;line-height:1.5;margin:10px 0 0}
+.row{display:flex;gap:8px;align-items:flex-start;padding:2px 0}
+.row .txt{white-space:pre-wrap;word-break:break-word;flex:1}
+.guide{border-left:1px dashed var(--border);margin-left:6px;padding-left:12px}
+.chip{display:inline-block;font:700 11px/1 var(--mono);padding:4px 6px;border-radius:4px;min-width:34px;text-align:center;flex:none;margin-top:1px}
+.c-R{color:var(--read);background:var(--read-bg)}
+.c-W{color:var(--write);background:var(--write-bg)}
+.c-EXT{color:var(--ext);background:var(--ext-bg)}
+.c-MEM{color:var(--mem);background:var(--mem-bg)}
+.c-TX{color:var(--tx);background:var(--tx-bg)}
+.c-call{color:var(--muted);background:var(--surface-2)}
+.c-err{color:var(--err);background:transparent;border:1px solid currentColor}
+.row.note .txt{color:var(--muted);font-style:italic;font-family:inherit}
+.diagram{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 18px;overflow-x:auto}
+.diagram .mermaid{min-width:640px}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:block;overflow-x:auto}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{background:var(--surface-2);font-size:13px}
+td code,p code,li code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+.layers{display:grid;gap:8px;margin:0 0 18px}
+.layer{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+.layer b{min-width:130px}
+.layer span{color:var(--muted);font-size:14px}
+.arrow{text-align:center;color:var(--muted);line-height:1}
+.subhead{margin:26px 0 10px;font-size:17px}
+.toolbar{display:flex;gap:8px;margin:0 0 12px}
+.toolbar button{font:inherit;font-size:13px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer}
+.theme-toggle{position:absolute;top:18px;right:16px}
+header{position:relative}
+.theme-toggle button{font:inherit;font-size:13px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer}
+@media (max-width:600px){.file{margin-left:0;width:100%}.theme-toggle{position:static;margin-top:10px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>CyberSpace program flows</h1>
+  <p>Every call from the browser to the database and Docker: login, assessment, and lab automation. Paths are relative to <code style="font-family:var(--mono)">Server/</code>.</p>
+  <div class="legend" id="legend"></div>
+  <div class="theme-toggle"><button id="themeBtn" type="button">Toggle theme</button></div>
+</header>
+<nav><div class="inner" role="tablist" id="tabs"></div></nav>
+<main id="main"></main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+/* ---------- Content ----------
+   Tree DSL: two spaces of indent = one level. Line prefixes:
+   "R " read, "W " write, "EXT " external, "MEM " memory, "TX" transaction,
+   "! " error/branch, "# " note; anything else is a function call. */
+
+const LEGEND = [
+  ['R','Database read (SELECT)'],['W','Database write'],['TX','One transaction'],
+  ['EXT','Google / Docker call'],['MEM','In-memory only'],['call','Function call'],['err','Error / branch']
+];
+
+const FLOWS = [
+/* ================= OVERVIEW ================= */
+{ id:'overview', tab:'0 · Overview', title:'How a request travels',
+  lede:'Every request passes through the same layers. Handlers parse HTTP, services apply the rules, repositories run the SQL, and only the lab engine talks to Docker.',
+  layers:[
+    ['Browser','Client/src/services/*.ts — fetch with credentials: include, so the session cookie is sent automatically'],
+    ['HTTP layer','internal/httpapi/*.go — middleware, parsing, error → status code'],
+    ['Service layer','internal/auth/google.go · internal/assessments/service.go — the rules'],
+    ['Repository layer','internal/database/*_repository.go — SQL only'],
+    ['MySQL + Docker','Docker is driven only by internal/labs/engine.go, in the background']
+  ],
+  cards:[
+    { title:'Startup', route:'go run ./cmd/api', file:'cmd/api/main.go → run()', open:true, tree:`
+config.Load()   reads env vars
+logger.New()
+database.NewMySQL()   opens the pool
+app.New()   dependency container
+auth.NewGoogleLogin()
+  EXT OIDC discovery against accounts.google.com (startup fails if unreachable)
+assessments.NewService(AssessmentRepository, LabRepository)
+  ! answer key shorter than 32 bytes → refuse to start
+httpapi.NewRouter(app)   registers routes + middleware
+go jobs.NewLoginFlowCleanup(...).Run()   every 1 h
+go assessmentService.RunExpiry(ctx, 5s)   every 5 s
+docker.New()
+  EXT Ping Docker daemon
+  ! production: fail if unreachable · development: run without labs
+  labs.NewEngine(...).Run()   4 workers + sweep loop
+httpServer.ListenAndServe()   until SIGINT / SIGTERM, then graceful shutdown` },
+    { title:'Middleware chain', route:'every request', file:'internal/httpapi/router.go', open:true, tree:`
+gin.Recovery() → InitCORS(allowedOrigins)
+  /api/v1/auth/google · /auth/google/callback   (public)
+  requireSession()
+    R auth_sessions ⨝ users   (one read on every protected request)
+    GET /me · DELETE /auth/session
+    requireOrigin(frontendURL)
+      # non-GET requests must send Origin = frontend (CSRF defence)
+      /student/*   requireRole("student")
+      /admin/*     requireRole("admin")` }
+  ]
+},
+
+/* ================= LOGIN ================= */
+{ id:'login', tab:'1 · Login', title:'Flow 1 — Login (Google OIDC)',
+  lede:'Sign-in is a full page redirect to Google and back. The server stores only hashes of the secrets, refuses unknown accounts (there is no self-registration), and keeps the session in an HTTP-only cookie.',
+  diagram:`sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant H as httpapi/auth.go
+    participant G as auth/google.go
+    participant R as AuthRepository
+    participant DB as MySQL
+    participant GO as Google
+    B->>H: GET /api/v1/me (page load)
+    H-->>B: 401 → Login page
+    B->>H: GET /api/v1/auth/google
+    H->>G: Start()
+    G->>R: SaveFlow()
+    R->>DB: INSERT oauth_login_flows
+    H-->>B: cookie cyberspace_login + 302 Google
+    B->>GO: choose account
+    GO-->>B: 302 /callback?state&code
+    B->>H: GET /callback
+    H->>G: Complete()
+    G->>R: ConsumeFlow()
+    R->>DB: SELECT FOR UPDATE + UPDATE consumed_at
+    G->>GO: Exchange(code, PKCE)
+    GO-->>G: id_token
+    G->>G: verify nonce, email_verified, hd
+    G->>R: FindOrBindUser()
+    R->>DB: SELECT users FOR UPDATE + UPDATE
+    G->>R: CreateSession()
+    R->>DB: INSERT auth_sessions
+    H-->>B: cookie cyberspace_session (4 h) + 303 frontend
+    B->>H: GET /api/v1/me
+    H->>R: ResolveSession()
+    R->>DB: SELECT auth_sessions ⨝ users
+    H-->>B: 200 {id,name,email,role}`,
+  cards:[
+    { title:'1a · Page load — am I signed in?', route:'GET /api/v1/me', file:'Client AuthContext.tsx → httpapi/auth.go:110', tree:`
+AuthContext useEffect → getCurrentUser()
+requireSession()
+  ! no cookie → 401 → client shows Login page
+authHandler.me → returns currentUser as JSON` },
+    { title:'1b · Start login', route:'GET /api/v1/auth/google', file:'httpapi/auth.go:27', open:true, tree:`
+authHandler.start
+  GoogleLogin.Start   auth/google.go:76
+    randomToken() ×3 → state, browserSecret, nonce
+    oauth2.GenerateVerifier() → PKCE verifier
+    AuthRepository.SaveFlow   auth_repository.go:25
+      W INSERT oauth_login_flows (state_hash, browser_hash, nonce, pkce_verifier, expires_at = now+5m)
+    oauth.AuthCodeURL(state, S256 challenge, nonce)
+Set-Cookie cyberspace_login = browserSecret (HttpOnly, 300 s)
+302 → accounts.google.com
+# Only hashes of state and browserSecret are stored.` },
+    { title:'1c · Google callback', route:'GET /api/v1/auth/google/callback', file:'httpapi/auth.go:51', open:true, tree:`
+authHandler.callback
+  ! cyberspace_login cookie missing → 401 invalid_login
+  delete cyberspace_login cookie
+  GoogleLogin.Complete   auth/google.go:115
+    AuthRepository.ConsumeFlow   auth_repository.go:42
+      TX
+        R SELECT nonce, pkce_verifier FROM oauth_login_flows WHERE state_hash, browser_hash match, not consumed, not expired FOR UPDATE
+        ! no row → ErrInvalidFlow
+        W UPDATE oauth_login_flows SET consumed_at = now   (single use)
+    EXT oauth.Exchange(code, PKCE verifier) → Google token endpoint
+    EXT verifier.Verify(id_token) → signature + audience
+    ! nonce ≠ flow nonce · email not verified · hd ≠ allowed domain → ErrAccessDenied
+    AuthRepository.FindOrBindUser   auth_repository.go:94
+      TX
+        R SELECT … FROM users WHERE google_subject = ? FOR UPDATE
+        R (if none) SELECT … FROM users WHERE email = ? FOR UPDATE
+        ! no user · status ≠ active · bound to another Google account → ErrAccessDenied
+        W UPDATE users SET google_subject, last_login_at   (first login)
+        W UPDATE users SET last_login_at   (later logins)
+    randomToken() → sessionToken
+    AuthRepository.CreateSession   auth_repository.go:193
+      W INSERT auth_sessions (user_id, token_hash = sha256(token), expires_at = now+4h)
+Set-Cookie cyberspace_session = token (HttpOnly, 4 h)
+303 → FRONTEND_URL
+# ErrInvalidFlow / ErrAccessDenied → 401 with one generic message; anything else → 503.` },
+    { title:'1d · Every protected request', route:'requireSession()', file:'httpapi/auth.go:110', tree:`
+read cookie cyberspace_session
+  ! missing → 401
+GoogleLogin.CurrentUser   google.go:205
+  ! length ≠ 43 → ErrUnauthenticated (no DB hit)
+  AuthRepository.ResolveSession   auth_repository.go:212
+    R SELECT u.* FROM auth_sessions s JOIN users u WHERE token_hash = ? AND not revoked AND not expired AND u.status = 'active'
+c.Set("currentUser", user)` },
+    { title:'1e · Logout', route:'DELETE /api/v1/auth/session', file:'httpapi/auth.go:153', tree:`
+authHandler.logout
+  ! Origin ≠ FRONTEND_URL → 403 bad_origin
+  GoogleLogin.SignOut   google.go:219
+    AuthRepository.RevokeSession   auth_repository.go:243
+      W UPDATE auth_sessions SET revoked_at = now, revocation_reason = 'user_logout'
+  delete cyberspace_session cookie → 204` },
+    { title:'1f · Background cleanup (every 1 h)', route:'LoginFlowCleanup.Run', file:'internal/jobs/login_flow_cleanup.go:40', tree:`
+runOnce
+  AuthRepository.DeleteExpiredFlows(grace = 1h)   auth_repository.go:259
+    W DELETE FROM oauth_login_flows WHERE expires_at < now − 1h LIMIT 1000
+    # repeats until a batch deletes fewer than 1000 rows` }
+  ],
+  tables:[
+    ['oauth_login_flows','ConsumeFlow','SaveFlow (insert), ConsumeFlow (consumed_at), cleanup (delete)'],
+    ['users','FindOrBindUser, ResolveSession','FindOrBindUser (google_subject, last_login_at)'],
+    ['auth_sessions','ResolveSession (every request)','CreateSession (insert), RevokeSession (revoked_at)']
+  ]
+},
+
+/* ================= ASSESSMENT ================= */
+{ id:'assessment', tab:'2 · Assessment', title:'Flow 2 — Assessment (student + admin)',
+  lede:'The student opens the portal, the admin takes attendance and starts the test, the student submits flags, and the attempt ends one of four ways. Every path ends in Service.finish().',
+  diagram:`sequenceDiagram
+    autonumber
+    participant S as Student
+    participant A as Admin
+    participant API as assessments.Service
+    participant DB as MySQL
+    participant L as Lab engine
+    S->>API: POST /student/lobby/heartbeat (every 5 s)
+    Note over API: presence.touch() in memory
+    A->>API: GET /admin/lobby (every 5 s)
+    A->>API: POST /admin/lobby/attendance
+    API->>DB: INSERT assessment_access_grants
+    A->>API: POST /admin/lobby/start
+    API->>DB: consume grant, INSERT attempts, deal 2 questions
+    API->>L: RequestProvision()
+    S->>API: heartbeat → activeAttemptId → workspace
+    S->>API: GET /student/attempts/:id (every 8 s)
+    S->>API: POST /answers {questionId, answer}
+    API->>DB: HMAC check, INSERT submission, add score
+    alt Finish / End / Revoke / deadline
+      API->>DB: UPDATE attempts → evaluated / revoked
+    end
+    API->>L: RequestStop()`,
+  sub:[
+  { h:'The shared rule engine', cards:[
+    { title:'evaluate() — what may this student do now?', route:'Service.evaluate', file:'assessments/service.go:455', open:true, tree:`
+AssessmentRepository.Catalog   assessment_repository.go:60
+  R SELECT levels ⨝ assessments ⨝ assessment_versions WHERE published ORDER BY level sequence
+AssessmentRepository.StudentState   :92
+  R SELECT every attempt of the student → ActiveAttemptID, PassedLevels, LastFailure, History
+  R SELECT approved, unexpired assessment_access_grants → AttendanceVersions
+next = first level not passed
+Status:
+  in_progress   an attempt is starting / in_progress
+  unavailable   catalog empty
+  completed     every level passed
+  cooldown      last failure on next level < 24 h ago
+  eligible      otherwise (+ AttendanceMarked)` }
+  ]},
+  { h:'Student side', cards:[
+    { title:'Overview', route:'GET /student/assessment', file:'service.go:89 · polled every 30 s', tree:`
+assessmentHandler.overview → Service.Overview
+  evaluate()   3 R` },
+    { title:'Portal heartbeat', route:'POST /student/lobby/heartbeat', file:'service.go:97 · polled every 5 s', open:true, tree:`
+assessmentHandler.heartbeat → Service.Heartbeat
+  evaluate()   3 R
+  MEM eligible → presence.touch(userID, now)  ·  otherwise presence.leave(userID)
+  # once the admin starts the test, overview.activeAttemptId is set → LobbyPage navigates to the workspace
+# Presence is in memory only: "online" = heartbeat within the last 30 s` },
+    { title:'Leave portal', route:'DELETE /student/lobby', file:'service.go:114', tree:`
+MEM presence.leave(userID) → 204` },
+    { title:'Load attempt (workspace)', route:'GET /student/attempts/:id', file:'service.go:119 · polled every 8 s', open:true, tree:`
+Service.Attempt
+  AssessmentRepository.Attempt   assessment_repository.go:443
+    R SELECT summary + owner FROM attempts ⨝ grants ⨝ versions ⨝ assessments ⨝ levels
+    dealtQuestions(withFlags = true)   :476
+      R SELECT attempt_questions ⨝ assessment_questions (+ points, + solved score)
+      R SELECT flag sub-questions ⨝ attempt_question_results (+ submission count)
+    labViews   :556
+      R SELECT lab_instances ⨝ services ⨝ ip_allocations ⨝ network_addresses (newest generation; IP only when running)
+  ! owner ≠ user → 404
+  # not in_progress → questions and lab hidden` },
+    { title:'Download capture', route:'GET /student/attempts/:id/questions/:qid/pcap', file:'service.go:166', tree:`
+Service.Pcap
+  Service.Attempt   5 R
+  ! attempt not in_progress → 409
+  find the wireshark question → filepath.Base(pcap_file)
+  os.Stat(PCAP_DIR/name)   file read
+c.FileAttachment (Cache-Control: no-store)` },
+    { title:'Submit a flag', route:'POST /student/attempts/:id/answers', file:'service.go:140', open:true, tree:`
+Service.Submit
+  ! answer empty or > 256 chars → 400
+  MEM limiter.allow(attemptID) — max 20 per minute → 429
+  evaluation.Digest(key, answer) = HMAC-SHA256(lowercase(trim(answer)))
+  AssessmentRepository.SubmitAnswer   assessment_repository.go:596
+    TX
+      R SELECT status, deadline, score, owner FROM attempts FOR UPDATE OF t
+      ! wrong owner → 404 · closed or past deadline → 409 attempt_closed
+      R SELECT points, max_submissions, expected_hmac FROM assessment_questions ⨝ attempt_questions ⨝ answer_validators
+      R SELECT is_solved FROM attempt_question_results
+      ! already solved → 409
+      R SELECT COUNT(*), MAX(sequence_no) FROM question_submissions
+      ! ≥ max_submissions → 429
+      correct = hmac.Equal(expected, digest)   constant time
+      W INSERT question_submissions (digest, is_correct, points_awarded)
+      W INSERT … ON DUPLICATE KEY UPDATE attempt_question_results
+      W UPDATE attempts SET score_awarded += points   (only if correct)
+# The plain-text answer is never stored.` },
+    { title:'Finish', route:'POST /student/attempts/:id/finish', file:'service.go:153', tree:`
+Service.Finish
+  AssessmentRepository.Attempt   5 R — ownership check
+  ! owner ≠ user → 404
+  finish(mode = "submit")   → see "End of the attempt"` }
+  ]},
+  { h:'Admin side', cards:[
+    { title:'Bulk actions wrapper', route:'Service.each()', file:'service.go:519', open:true, tree:`
+for each studentId (duplicates skipped):
+  AssessmentRepository.StudentByPublicID
+    R SELECT users ⟕ student_profiles WHERE public_id AND active student
+  run(student, now)   ← the action-specific part below
+  audit()
+    W INSERT audit_logs (actor, action, outcome, entity, after_data, ip, user_agent)
+# one student failing does not stop the rest` },
+    { title:'Portal list', route:'GET /admin/lobby', file:'service.go:203 · polled every 5 s', tree:`
+Service.Lobby
+  MEM presence.online(now, 30 s)
+  R AttendanceUsers — approved, unexpired grants
+  R Students(online ∪ attendance)
+  evaluate() per student   3 R each` },
+    { title:'Mark attendance', route:'POST /admin/lobby/attendance', file:'service.go:250', open:true, tree:`
+each(…, "attendance.mark")
+  ! MEM student not online in portal → not_in_lobby
+  evaluate()
+  ! not eligible → not_eligible
+  AssessmentRepository.MarkAttendance   assessment_repository.go:270
+    TX
+      R SELECT id FROM users FOR UPDATE   (lockUser — serializes per student)
+      R SELECT existing approved grant → if found, return (idempotent)
+      W INSERT assessment_access_grants (manual_admin, approved, eligible_until = now+4h)
+  W audit_logs` },
+    { title:'Cancel attendance', route:'DELETE /admin/lobby/attendance/:studentId', file:'service.go:268', tree:`
+each(…, "attendance.cancel")
+  W UPDATE assessment_access_grants SET status = 'revoked'
+  ! 0 rows → no_attendance
+  W audit_logs` },
+    { title:'Start the test', route:'POST /admin/lobby/start', file:'service.go:281', open:true, tree:`
+each(…, "attempt.start")
+  evaluate()
+  ! not eligible / attendance not marked → error
+  AssessmentRepository.StartAttempt   assessment_repository.go:352
+    TX
+      R lockUser — SELECT users FOR UPDATE
+      R SELECT COUNT(*) active attempts
+      ! > 0 → not_eligible
+      R SELECT approved grant for this version
+      ! none → no_attendance
+      W UPDATE assessment_access_grants SET status = 'consumed'
+      W INSERT attempts (in_progress, started_at, deadline_at = now + duration, max_score)
+      for pool in [wireshark, nmap]:
+        R SELECT question … ORDER BY RAND() LIMIT 1
+        W INSERT attempt_questions
+      W INSERT attempt_events ('started')
+  MEM presence.leave(student)
+  LabRepository.RequestProvision(attempt, lab template)   → Docker flow step 1
+  # lab failure only adds a warning; the attempt still stands
+  W audit_logs` },
+    { title:'Monitor attempts', route:'GET /admin/attempts?scope=active|recent', file:'service.go:321 · 5 s / 15 s', tree:`
+AssessmentRepository.ListAttempts(limit 200)
+  R SELECT summaries ⨝ users ⟕ student_profiles
+  R dealtQuestions(withFlags = false)
+  R labViews` },
+    { title:'Restart lab', route:'POST /admin/attempts/:id/lab/restart', file:'service.go:355', tree:`
+restartLab
+  AssessmentRepository.Attempt   5 R
+  ! not in_progress → 409
+  R AttemptLab — lab template of the nmap question
+  ! none → no_lab
+  LabRepository.RequestProvision   (new generation_no)
+  ! lab still active → 409 lab_active
+W audit_logs ('lab.restart')` },
+    { title:'Read-only pages', route:'GET /admin/question-bank · /admin/students', file:'service.go:385, 403', tree:`
+QuestionBank
+  R Catalog
+  R questions + lab yaml per assessment · R flag prompts
+  os.Stat pcap file → pcapPresent
+StudentRecords(search)
+  R students + levels passed (LIKE search)
+  R latest attempt per student → cooldownUntil` }
+  ]},
+  { h:'End of the attempt', cards:[
+    { title:'Four ways to end — all call finish()', route:'Service.finish', file:'service.go:507', open:true, tree:`
+# Finish (student) → mode submit → evaluated, scored
+# End (admin) → mode end → evaluated, scored + audit
+# Revoke (admin, reason required) → mode revoke → revoked, not scored + audit
+# Deadline (RunExpiry every 5 s) → mode expire → evaluated, scored as of the deadline
+AssessmentRepository.FinishAttempt   assessment_repository.go:717
+  TX
+    R SELECT status, score, pass_score, deadline FROM attempts FOR UPDATE OF t
+    ! not in_progress → 409 attempt_closed
+    W revoke: UPDATE attempts SET status = 'revoked', ended_at, reason
+    W others: UPDATE attempts SET status = 'evaluated', result = score ≥ pass_score ? passed : failed
+    W INSERT attempt_events (submitted | ended | expired | revoked)
+  R Attempt() reload → final summary
+LabRepository.RequestStop(attempt)   → Docker flow step 4
+# a failed stop request is only logged; the engine sweep stops the lab anyway` },
+    { title:'Expiry job', route:'RunExpiry (every 5 s)', file:'service.go:423 · started in main.go:133', tree:`
+ExpireDue
+  R SELECT id FROM attempts WHERE in_progress AND deadline_at ≤ now
+  for each → finish(id, actor 0, "expire", "Time expired")
+# Next overview: passed → next level · failed / revoked → 24 h cooldown` }
+  ]}
+  ],
+  tables:[
+    ['levels, assessments, assessment_versions','Catalog','— (seeded by cmd/import-questions)'],
+    ['assessment_questions, answer_validators','StartAttempt, dealtQuestions, SubmitAnswer, QuestionBank','— (seeded)'],
+    ['assessment_access_grants','StudentState, AttendanceUsers, MarkAttendance, StartAttempt','MarkAttendance (insert), CancelAttendance (revoked), StartAttempt (consumed)'],
+    ['attempts','nearly everything','StartAttempt (insert), SubmitAnswer (score), FinishAttempt (status, result)'],
+    ['attempt_questions','dealtQuestions, AttemptLab','StartAttempt'],
+    ['question_submissions','dealtQuestions, SubmitAnswer','SubmitAnswer'],
+    ['attempt_question_results','dealtQuestions, SubmitAnswer','SubmitAnswer (upsert)'],
+    ['attempt_events','—','StartAttempt, FinishAttempt'],
+    ['audit_logs','—','every admin action']
+  ]
+},
+
+/* ================= DOCKER ================= */
+{ id:'docker', tab:'3 · Docker', title:'Flow 3 — Docker automation (lab engine)',
+  lede:'HTTP handlers never touch Docker. They write a lab_instances row and an orchestration_jobs row. The engine (4 workers + a sweep loop) claims those jobs and drives Docker. A job interrupted by a crash is picked up again after its 5-minute lease.',
+  diagram:`stateDiagram-v2
+    [*] --> queued: RequestProvision
+    queued --> provisioning: MarkProvisioning
+    queued --> stopped: RequestStop before claim
+    provisioning --> running: MarkRunning
+    provisioning --> failed: FailProvision after 3 tries
+    provisioning --> stopping: RequestStop
+    running --> stopping: RequestStop
+    stopping --> stopped: MarkStopped
+    stopped --> [*]
+    failed --> [*]`,
+  cards:[
+    { title:'Engine startup', route:'Engine.Run', file:'labs/engine.go:74', tree:`
+4 × work()   RunOnce(); if no job, sleep 1 s
+1 × sweepLoop()   Sweep() now, then every 30 s
+# defaults: lease 5 min · Docker op timeout 60 s · retry delay 5 s × attempt · max_attempts 3
+# generated columns + unique keys: one active lab per attempt, one active lab per IP` },
+    { title:'Step 1 · Request a lab', route:'LabRepository.RequestProvision', file:'database/lab_repository.go:39', open:true, tree:`
+# called by Service.Start and Service.restartLab; retried up to 3× on deadlock
+TX (READ COMMITTED)
+  R SELECT id FROM docker_hosts WHERE online FOR UPDATE   (serializes all starts)
+  R SELECT lowest free network_addresses row (not reserved, not allocated, host below max_instances)
+  ! none → ErrNoFreeAddress → 503 no_lab_capacity
+  R SELECT MAX(generation_no) + 1 FROM lab_instances
+  W INSERT lab_instances (status = 'queued')
+  ! active lab exists (uq_lab_instances_one_active) → ErrLabActive
+  W INSERT lab_instance_services ('target', pending, hostname cyberspace-lab-<id>)
+  W INSERT ip_allocations   ← IP reserved
+  W INSERT orchestration_jobs ('provision', pending, key provision:<id>)` },
+    { title:'Step 2 · Worker claims a job', route:'Engine.RunOnce → ClaimJob', file:'engine.go:104 · lab_repository.go:235', open:true, tree:`
+TX
+  R SELECT next job WHERE attempt_count < max_attempts AND (pending & available OR running & lease expired) FOR UPDATE SKIP LOCKED
+  # SKIP LOCKED: the 4 workers never grab the same job
+  W UPDATE orchestration_jobs SET status = 'running', attempt_count + 1, locked_at, locked_by
+switch job.Type → provision() | stop()
+# runs with its own 2 × 60 s timeout; shutdown waits for it` },
+    { title:'Step 3 · Provision the container', route:'Engine.provision', file:'engine.go:127', open:true, tree:`
+LabRepository.LoadTarget   lab_repository.go:376
+  R SELECT status, yaml_spec, network name, ip_address
+  labs.ParseSpec(yaml) → image
+! status not queued / provisioning → CompleteJob('cancelled')
+LabRepository.MarkProvisioning   via transition()
+  TX
+    R SELECT status FOR UPDATE
+    W UPDATE lab_instances SET status = 'provisioning'
+    W UPDATE lab_instance_services SET state = 'creating'
+runtime.Remove("cyberspace-lab-<id>")   docker/runtime.go:82
+  EXT ContainerRemove(force) — clears a leftover from a crashed run
+runtime.Start(name, image, network "macvlan", static IP)   runtime.go:52
+  EXT ContainerCreate (labels cyberspace.managed=true, lab_instance_id)
+  EXT ContainerStart
+LabRepository.MarkRunning(containerID)   via transition()
+  TX
+    R SELECT status FOR UPDATE (must be provisioning)
+    W UPDATE lab_instances SET status = 'running', ready_at
+    W UPDATE lab_instance_services SET state = 'running', container_id
+CompleteJob('succeeded')
+  W UPDATE orchestration_jobs SET status = 'succeeded'
+# the student's attempt view now shows lab {status: running, ip: 192.168.20.x}` },
+    { title:'Step 3b · Provision failed', route:'notStarted → provisionFailed', file:'engine.go:178, 186', tree:`
+EXT runtime.Remove(name) — undo the half-started container
+! ErrStateChanged (a stop came in meanwhile) → CompleteJob('cancelled')
+attempt_count < 3 → RetryJob
+  W UPDATE job status = 'pending', available_at = now + 5 s × attempt, last_error
+otherwise → FailProvision
+  TX
+    W UPDATE orchestration_jobs SET status = 'failed'
+    R SELECT lab_instances status FOR UPDATE
+    finishInstance('failed')
+      W UPDATE lab_instances status = 'failed', failure_message
+      W UPDATE lab_instance_services state = 'failed'
+      W UPDATE ip_allocations released_at = now   ← IP freed
+# admin sees it on Monitoring and can press Restart lab` },
+    { title:'Step 4 · Request a stop', route:'LabRepository.RequestStop', file:'lab_repository.go:165', open:true, tree:`
+# called by Service.finish (every way an attempt ends) and by the sweep
+TX
+  R SELECT id, status FROM lab_instances WHERE active_attempt_id = ? FOR UPDATE
+  # no active lab → return (safe to repeat)
+  W UPDATE orchestration_jobs SET 'cancelled' WHERE unclaimed provision job
+  queued and withdrawn (no container ever existed):
+    finishInstance('stopped')   W lab_instances · W services · W ip_allocations.released_at
+  otherwise:
+    W UPDATE lab_instances SET status = 'stopping'
+    W INSERT orchestration_jobs ('stop', key stop:<id>) ON DUPLICATE KEY → reset only if failed` },
+    { title:'Step 5 · Remove the container', route:'Engine.stop', file:'engine.go:194', open:true, tree:`
+runtime.Remove("cyberspace-lab-<id>")
+  EXT ContainerRemove(force, volumes) — missing container is fine
+LabRepository.MarkStopped   via transition() (must be stopping)
+  finishInstance('stopped', 'removed')
+    W UPDATE lab_instances SET status = 'stopped', stopped_at
+    W UPDATE lab_instance_services SET state = 'removed'
+    W UPDATE ip_allocations SET released_at = now   ← IP back in the pool
+CompleteJob('succeeded')
+! failure: RetryJob (attempt < 3) or CompleteJob('failed'); instance stays stopping → sweep requeues` },
+    { title:'Step 6 · Sweep (every 30 s)', route:'Engine.Sweep', file:'engine.go:235', open:true, tree:`
+FailStaleJobs
+  W UPDATE orchestration_jobs SET 'failed' WHERE running, final attempt, lease expired
+ExpiredAttempts
+  R SELECT attempt_id FROM lab_instances ⨝ attempts WHERE lab active AND (attempt ended OR deadline passed)
+  for each → RequestStop(attemptID)   (step 4)
+removeOrphans
+  EXT runtime.Managed() — ContainerList(label cyberspace.managed=true)
+  R LiveInstances — status IN (provisioning, running, stopping)
+  EXT runtime.Remove(name) for every labelled container with no live instance
+# only labelled containers are ever touched` }
+  ],
+  tables:[
+    ['docker_hosts','Row lock serializes starts; max_instances caps concurrent labs',''],
+    ['network_pools','Host → Docker network name (macvlan) and CIDR',''],
+    ['network_addresses','Usable IPs (e.g. .182–.212); is_reserved excludes some',''],
+    ['ip_allocations','Address ↔ service; released_at frees it',''],
+    ['lab_template_versions','yaml_spec → Docker image',''],
+    ['lab_instances','One row per lab start; status state machine',''],
+    ['lab_instance_services','The single target container: state, container_id',''],
+    ['orchestration_jobs','The job queue: pending → running → succeeded / failed / cancelled','']
+  ]
+},
+
+/* ================= TIMELINE ================= */
+{ id:'timeline', tab:'4 · One sitting', title:'End to end: one sitting',
+  lede:'All three flows together, in the order they happen for one student.',
+  timeline:[
+    ['T−5 min','Student','Signs in with Google','oauth_login_flows, users.last_login_at, auth_sessions'],
+    ['T−4 min','Student','Opens the Lobby page; heartbeat every 5 s','memory only'],
+    ['T−3 min','Admin','Sees the student online → Mark attendance','assessment_access_grants (approved), audit_logs'],
+    ['T 0','Admin','Start','grant consumed, attempts, attempt_questions ×2, attempt_events, lab_instances (queued), lab_instance_services, ip_allocations, orchestration_jobs (provision), audit_logs'],
+    ['T+1 s','Engine','Worker claims the job → Docker create/start on macvlan','job → succeeded; instance → running'],
+    ['T+5 s','Student','Heartbeat returns activeAttemptId → Workspace; polls every 8 s and sees the lab IP','—'],
+    ['T+…','Student','Downloads the pcap, scans the lab IP, submits flags','question_submissions, attempt_question_results, attempts.score_awarded'],
+    ['T+end','Student / Admin / expiry job','Finish / End / Revoke / deadline','attempts → evaluated or revoked, attempt_events, instance → stopping, orchestration_jobs (stop)'],
+    ['+1 s','Engine','Worker removes the container','instance → stopped, ip_allocations.released_at (IP reusable)'],
+    ['next','Student','Overview shows the result, the next level, or a 24 h cooldown','—']
+  ]
+}
+];
+
+/* ---------- Rendering ---------- */
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chip = (k, label) => `<span class="chip c-${k}">${esc(label ?? k)}</span>`;
+
+function renderTree(src){
+  const lines = src.split('\n').filter(l => l.trim());
+  const base = Math.min(...lines.map(l => l.match(/^ */)[0].length));
+  let html = '', depth = 0;
+  for (const raw of lines){
+    const d = (raw.match(/^ */)[0].length - base) / 2;
+    while (depth < d){ html += '<div class="guide">'; depth++; }
+    while (depth > d){ html += '</div>'; depth--; }
+    let t = raw.trim(), kind = 'call', label = '→', cls = '';
+    const m = t.match(/^(R|W|EXT|MEM) (.*)$/);
+    if (m){ kind = m[1]; label = m[1]; t = m[2]; }
+    else if (t.startsWith('TX')){ kind = 'TX'; label = 'TX'; t = t.slice(2).trim() || 'transaction'; }
+    else if (t.startsWith('! ')){ kind = 'err'; label = '!'; t = t.slice(2); }
+    else if (t.startsWith('# ')){ cls = ' note'; t = t.slice(2); label = 'i'; }
+    html += `<div class="row${cls}">${chip(kind, label)}<span class="txt">${esc(t)}</span></div>`;
+  }
+  while (depth-- > 0) html += '</div>';
+  return `<div class="tree">${html}</div>`;
+}
+
+function renderCard(c){
+  return `<details class="card"${c.open ? ' open' : ''}>
+    <summary><h3>${esc(c.title)}</h3><span class="route">${esc(c.route)}</span><span class="file">${esc(c.file)}</span></summary>
+    <div class="body">${renderTree(c.tree)}</div></details>`;
+}
+
+function renderTable(rows, heads){
+  return `<table><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr>${r.slice(0, heads.length).map((v, i) => `<td>${i === 0 ? `<code>${esc(v)}</code>` : esc(v)}</td>`).join('')}</tr>`).join('')
+  }</tbody></table>`;
+}
+
+function renderFlow(f){
+  let h = `<h2>${esc(f.title)}</h2><p class="lede">${esc(f.lede)}</p>`;
+  if (f.layers){
+    h += '<div class="layers">' + f.layers.map((l, i) =>
+      (i ? '<div class="arrow">▼</div>' : '') + `<div class="layer"><b>${esc(l[0])}</b><span>${esc(l[1])}</span></div>`).join('') + '</div>';
+  }
+  if (f.diagram) h += `<div class="diagram"><pre class="mermaid">${esc(f.diagram)}</pre></div>`;
+  if (f.cards || f.sub) h += `<div class="toolbar"><button type="button" data-expand="1">Expand all</button><button type="button" data-expand="0">Collapse all</button></div>`;
+  if (f.cards) h += f.cards.map(renderCard).join('');
+  if (f.sub) h += f.sub.map(s => `<h3 class="subhead">${esc(s.h)}</h3>` + s.cards.map(renderCard).join('')).join('');
+  if (f.tables){
+    const twoCol = f.tables.every(r => !r[2]);
+    h += `<h3 class="subhead">Tables touched</h3>` +
+      renderTable(f.tables, twoCol ? ['Table', 'Role'] : ['Table', 'Read by', 'Written by']);
+  }
+  if (f.timeline) h += renderTable(f.timeline, ['When', 'Who', 'What happens', 'Key writes']);
+  return h;
+}
+
+document.getElementById('legend').innerHTML = LEGEND.map(([k, d]) =>
+  `<span style="display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">${chip(k, k === 'call' ? '→' : k === 'err' ? '!' : k)}${d}</span>`).join('');
+
+const tabs = document.getElementById('tabs'), main = document.getElementById('main');
+FLOWS.forEach((f, i) => {
+  tabs.insertAdjacentHTML('beforeend', `<button role="tab" data-id="${f.id}" aria-selected="${i === 0}">${esc(f.tab)}</button>`);
+  main.insertAdjacentHTML('beforeend', `<section class="panel${i === 0 ? ' active' : ''}" id="p-${f.id}">${renderFlow(f)}</section>`);
+});
+
+let rendered = new Set();
+async function drawDiagrams(panel){
+  if (!window.mermaid || rendered.has(panel.id)) return;
+  rendered.add(panel.id);
+  const nodes = panel.querySelectorAll('pre.mermaid');
+  if (nodes.length) { try { await mermaid.run({ nodes }); } catch (e) { console.error(e); } }
+}
+function show(id){
+  tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', b.dataset.id === id));
+  main.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'p-' + id));
+  try { localStorage.setItem('flows-tab', id); } catch {}
+  drawDiagrams(document.getElementById('p-' + id));
+}
+tabs.addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.id); });
+main.addEventListener('click', e => {
+  const b = e.target.closest('[data-expand]'); if (!b) return;
+  b.closest('.panel').querySelectorAll('details').forEach(d => d.open = b.dataset.expand === '1');
+});
+
+function isDark(){
+  const t = document.documentElement.dataset.theme;
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function initMermaid(){
+  if (!window.mermaid) return;
+  mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'strict',
+    sequence: { mirrorActors: false, useMaxWidth: true } });
+}
+document.getElementById('themeBtn').addEventListener('click', () => {
+  document.documentElement.dataset.theme = isDark() ? 'light' : 'dark';
+  try { localStorage.setItem('flows-theme', document.documentElement.dataset.theme); } catch {}
+  // Re-render diagrams in the new theme.
+  rendered = new Set();
+  document.querySelectorAll('.diagram').forEach((d, i) => {
+    const f = FLOWS.filter(x => x.diagram)[i];
+    d.innerHTML = `<pre class="mermaid">${esc(f.diagram)}</pre>`;
+  });
+  initMermaid();
+  drawDiagrams(document.querySelector('.panel.active'));
+});
+
+try { const t = localStorage.getItem('flows-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+initMermaid();
+let start = 'overview';
+try { start = localStorage.getItem('flows-tab') || start; } catch {}
+show(FLOWS.some(f => f.id === start) ? start : 'overview');
+</script>
+</body>
+</html>

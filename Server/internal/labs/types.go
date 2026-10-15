@@ -16,8 +16,8 @@ var (
 	// ErrNoFreeAddress means no online host has both spare capacity and an
 	// address that is neither reserved nor allocated to an active lab.
 	ErrNoFreeAddress = errors.New("no free lab IP address")
-	// ErrLabActive means the attempt already has a lab that is not stopped.
-	ErrLabActive = errors.New("attempt already has an active lab")
+	// ErrLabActive means the question already has a lab that is not stopped.
+	ErrLabActive = errors.New("question already has an active lab")
 	// ErrStateChanged means the instance left the state the engine expected,
 	// usually because a stop was requested while it was being provisioned.
 	ErrStateChanged = errors.New("lab instance changed state")
@@ -60,11 +60,13 @@ type Container struct {
 
 // Repository is the storage the engine needs.
 type Repository interface {
-	// RequestProvision creates a queued lab for the attempt, allocates it an
-	// address, and queues its provision job, all in one transaction.
-	RequestProvision(ctx context.Context, attemptID, templateVersionID uint64) (instanceID uint64, err error)
-	// RequestStop queues the removal of the attempt's active lab. It does
-	// nothing when the attempt has no active lab, so it is safe to repeat.
+	// RequestProvision creates a queued lab for one dealt question of the
+	// attempt, allocates it an address, and queues its provision job, all in
+	// one transaction. Each question has its own container, so an attempt
+	// may hold several labs; questionID zero is a lab with no question.
+	RequestProvision(ctx context.Context, attemptID, questionID, templateVersionID uint64) (instanceID uint64, err error)
+	// RequestStop queues the removal of every active lab of the attempt. It
+	// does nothing when the attempt has none, so it is safe to repeat.
 	RequestStop(ctx context.Context, attemptID uint64) error
 
 	ClaimJob(ctx context.Context, workerID string, lease time.Duration) (Job, bool, error)

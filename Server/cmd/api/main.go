@@ -21,6 +21,7 @@ import (
 	"github.com/G6kco/CyberSpace/internal/jobs"
 	"github.com/G6kco/CyberSpace/internal/labs"
 	"github.com/G6kco/CyberSpace/internal/labs/docker"
+	"github.com/G6kco/CyberSpace/internal/levels"
 	"github.com/G6kco/CyberSpace/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -99,11 +100,16 @@ func run() error {
 	// the lab tables even when the engine is disabled, so a development
 	// server without Docker still runs the whole flow with labs queued.
 	labRepository := database.NewLabRepository(db)
+	assessmentRepository := database.NewAssessmentRepository(db)
 	assessmentService, err := assessments.NewService(
-		database.NewAssessmentRepository(db),
+		assessmentRepository,
 		labRepository,
 		log,
-		assessments.Config{AnswerKey: []byte(cfg.AnswerKey), PcapDir: cfg.PcapDir},
+		assessments.Config{
+			AnswerKey: []byte(cfg.AnswerKey),
+			PcapDir:   cfg.PcapDir,
+			FilesDir:  cfg.FilesDir,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("initialize assessments: %w", err)
@@ -113,6 +119,22 @@ func run() error {
 			zap.String("dir", cfg.PcapDir), zap.Error(err))
 	}
 	application.Assessments = assessmentService
+
+	// The level builder: administrators create levels, their questions,
+	// lab images and downloadable files.
+	if err := os.MkdirAll(cfg.FilesDir, 0o750); err != nil {
+		return fmt.Errorf("create files directory: %w", err)
+	}
+	levelService, err := levels.NewService(
+		database.NewLevelRepository(db),
+		assessmentRepository,
+		log,
+		levels.Config{AnswerKey: []byte(cfg.AnswerKey), FilesDir: cfg.FilesDir},
+	)
+	if err != nil {
+		return fmt.Errorf("initialize level builder: %w", err)
+	}
+	application.Levels = levelService
 
 	// Gin's debug mode prints every route and warns on startup; production
 	// runs quiet.

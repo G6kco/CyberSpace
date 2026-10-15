@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { poolName } from '../../lib/assessment'
+import { passMarkLabel, poolName } from '../../lib/assessment'
 import { errorMessage } from '../../services/api'
 import { adminApi } from '../../services/assessments'
 import type { BankAssessment, BankQuestion, Pool } from '../../types/assessment'
@@ -32,7 +32,7 @@ export function AssessmentManagementPage() {
         <p className="eyebrow">Assessment catalogue</p>
         <h2 className="page-heading">Question bank</h2>
         <p className="mt-2 max-w-2xl text-secondary">
-          Each attempt deals one random question from each pool. Expected flags are stored as keyed hashes and are never shown.
+          Every published level's questions. Level 1 deals one random question per pool; a built level deals its set number of random scenarios. Expected answers are stored as keyed hashes and are never shown. Build and edit levels under Levels.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
@@ -43,11 +43,12 @@ export function AssessmentManagementPage() {
             <option value="all">All pools</option>
             <option value="wireshark">Wireshark</option>
             <option value="nmap">Nmap</option>
+            <option value="scenario">Scenario</option>
           </select>
         </label>
       </div>
       {bank.length === 0 ? (
-        <EmptyState title="No published assessments" description="Import the question bank on the server to publish Level 1." />
+        <EmptyState title="No published assessments" description="Publish a level under Levels, or import Level 1 on the server." />
       ) : (
         bank.map((assessment) => <AssessmentBank key={assessment.level} assessment={assessment} search={search} pool={pool} />)
       )}
@@ -75,14 +76,14 @@ function AssessmentBank({ assessment, search, pool }: { assessment: BankAssessme
           </div>
           <h3 className="mt-2 text-lg font-semibold text-strong">{assessment.title}</h3>
           <p className="mt-1 text-sm text-secondary">
-            {Math.round(assessment.durationSeconds / 60)} minutes · pass {assessment.passScore} / {assessment.totalPoints}
+            {Math.round(assessment.durationSeconds / 60)} minutes · pass {passMarkLabel(assessment)}{assessment.questionsPerAttempt ? ` · ${assessment.questionsPerAttempt} questions dealt` : ''}
           </p>
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-          {(['wireshark', 'nmap'] as const).map((p) => (
+          {(['wireshark', 'nmap', 'scenario'] as const).filter((p) => assessment.questions.some((q) => q.pool === p)).map((p) => (
             <div key={p} className="contents">
               <dt className="text-secondary">{poolName[p]}</dt>
-              <dd className="font-medium text-strong">{count(p, 'easy')} easy · {count(p, 'hard')} hard</dd>
+              <dd className="font-medium text-strong">{p === 'scenario' ? `${count(p, '')} questions` : `${count(p, 'easy')} easy · ${count(p, 'hard')} hard`}</dd>
             </div>
           ))}
         </dl>
@@ -112,7 +113,7 @@ function QuestionRow({ question }: { question: BankQuestion }) {
     <details className="group p-4 sm:px-5">
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3">
         <span className="font-mono text-sm font-semibold text-strong">{question.code}</span>
-        <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>
+        {question.difficulty && <StatusBadge tone={question.difficulty === 'hard' ? 'warning' : 'neutral'}>{question.difficulty}</StatusBadge>}
         <span className="text-sm text-secondary">{question.points} pts · {question.flagPrompts.length} flag(s)</span>
         <span className="flex items-center gap-1.5 text-sm text-secondary">
           {question.pool === 'wireshark' ? (
@@ -121,7 +122,7 @@ function QuestionRow({ question }: { question: BankQuestion }) {
               <span className="font-mono">{question.pcapFile}</span>
             </>
           ) : (
-            <>image <span className="font-mono">{question.image}</span></>
+            question.image ? <>image <span className="font-mono">{question.image}</span></> : null
           )}
         </span>
         <span className="ml-auto text-xs text-muted">dealt {question.timesDealt}×</span>

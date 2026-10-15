@@ -20,14 +20,14 @@ function attempt(patch: Record<string, unknown> = {}) {
     score: 0, maxScore: 100, passScore: 80,
     startedAt: new Date(now - 60000).toISOString(), deadlineAt: new Date(now + 3540000).toISOString(), endedAt: null,
     serverTime: new Date(now).toISOString(),
-    lab: { status: 'running', ip: '192.168.20.182' },
     questions: [
       {
-        id: 11, code: 'wireshark-02', pool: 'wireshark', difficulty: 'hard', prompt: 'Find the true message.', points: 50, score: 0, hasPcap: true,
+        id: 11, code: 'wireshark-02', pool: 'wireshark', difficulty: 'hard', prompt: 'Find the true message.', points: 50, score: 0, hasPcap: true, files: [], hasLab: false, lab: null,
         flags: [{ id: 111, prompt: 'Submit the flag.', points: 50, solved: false, submissions: 0 }],
       },
       {
-        id: 21, code: 'nmap-01', pool: 'nmap', difficulty: 'easy', prompt: 'Scan the target.', points: 50, score: 0, hasPcap: false,
+        id: 21, code: 'nmap-01', pool: 'nmap', difficulty: 'easy', prompt: 'Scan the target.', points: 50, score: 0, hasPcap: false, files: [], hasLab: true,
+        lab: { status: 'running', ip: '192.168.20.182' },
         flags: [{ id: 211, prompt: 'Submit the flag.', points: 50, solved: false, submissions: 0 }],
       },
     ],
@@ -102,7 +102,7 @@ describe('student assessment flow', () => {
   })
 
   it('shows only the result of a finished attempt', async () => {
-    mockApi('GET', '/api/v1/student/attempts/7', attempt({ status: 'evaluated', result: 'passed', score: 90, questions: null, lab: null, endedAt: new Date().toISOString() }))
+    mockApi('GET', '/api/v1/student/attempts/7', attempt({ status: 'evaluated', result: 'passed', score: 90, questions: null, endedAt: new Date().toISOString() }))
     renderApp('/student/attempts/7')
 
     expect(await screen.findByText('Passed')).toBeInTheDocument()
@@ -116,5 +116,27 @@ describe('student assessment flow', () => {
 
     expect(await screen.findByText('Retake available after')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Enter test portal/ })).not.toBeInTheDocument()
+  })
+
+  it('gives each scenario of a built level its own target and files', async () => {
+    const scenario = (id: number, ip: string | null, files: unknown[] = []) => ({
+      id, code: `q-0${id}`, pool: 'scenario', difficulty: '', prompt: `Scenario ${id} brief.`, points: 25, score: 0, hasPcap: false,
+      flags: [{ id: id * 10, prompt: 'Admin password', points: 25, solved: false, submissions: 0 }],
+      files, hasLab: ip !== null, lab: ip ? { status: 'running', ip } : null,
+    })
+    mockApi('GET', '/api/v1/student/attempts/7', attempt({
+      level: 'Level 2', maxScore: 50, passScore: 30,
+      questions: [scenario(1, '192.168.20.183', [{ id: 5, name: 'access.log', size: 2048 }]), scenario(2, '192.168.20.184')],
+    }))
+    renderApp('/student/attempts/7')
+
+    const first = await screen.findByRole('region', { name: 'Scenario 1 question' })
+    const second = screen.getByRole('region', { name: 'Scenario 2 question' })
+    expect(within(first).getByText('192.168.20.183')).toBeInTheDocument()
+    expect(within(second).getByText('192.168.20.184')).toBeInTheDocument()
+    expect(within(first).getByRole('link', { name: /access\.log/ })).toHaveAttribute(
+      'href', 'http://localhost:8080/api/v1/student/attempts/7/files/5',
+    )
+    expect(within(first).getByText(/Answer 1: Admin password/)).toBeInTheDocument()
   })
 })

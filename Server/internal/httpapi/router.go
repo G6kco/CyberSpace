@@ -48,6 +48,14 @@ func NewRouter(application *app.App) *gin.Engine {
 			})
 			application.Logger.Info("Assessment routes registered")
 		}
+		if application.Levels != nil {
+			guarded := protected.Group("", requireOrigin(application.Config.FrontendURL))
+			registerLevelRoutes(guarded, &levelHandler{
+				service: application.Levels,
+				logger:  application.Logger,
+			})
+			application.Logger.Info("Level builder routes registered")
+		}
 
 		application.Logger.Info("Authentication routes registered")
 	}

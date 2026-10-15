@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/Feedback'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { usePolling } from '../../hooks/usePolling'
-import { attemptOutcome } from '../../lib/assessment'
+import { attemptOutcome, passMarkLabel } from '../../lib/assessment'
 import { formatDateTime } from '../../lib/format'
 import { studentApi } from '../../services/assessments'
 import type { StudentOverview } from '../../types/assessment'
@@ -126,13 +126,13 @@ function StatusCard({ overview, onEnter }: { overview: StudentOverview; onEnter:
             </span>
             <span className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4" />
-              Pass mark {assessment.passScore} / {assessment.totalPoints}
+              Pass mark {passMarkLabel(assessment)}
             </span>
           </div>
           <ol className="mt-5 space-y-2 text-sm text-secondary">
             <li>1. Enter the test portal at your booked slot and stay on the page.</li>
             <li>2. The administrator takes attendance and starts the test.</li>
-            <li>3. You get one Wireshark and one Nmap question. Submit each flag as you find it.</li>
+            <li>3. {assessment.questionsPerAttempt ? `You get ${assessment.questionsPerAttempt} random scenario questions; some have their own target to attack or files to download.` : 'You get one Wireshark and one Nmap question.'} Submit each answer as you find it.</li>
           </ol>
         </div>
         <div className="flex flex-col justify-center rounded-lg bg-app p-4">
