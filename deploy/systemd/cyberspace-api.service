@@ -1,0 +1,26 @@
+# CyberSpace API. Install as /etc/systemd/system/cyberspace-api.service.
+[Unit]
+Description=CyberSpace API
+After=network-online.target mysql.service docker.service
+Wants=network-online.target
+Requires=mysql.service docker.service
+
+[Service]
+User=cyberspace
+Group=cyberspace
+# The lab engine starts containers through the Docker socket.
+SupplementaryGroups=docker
+WorkingDirectory=/opt/cyberspace
+EnvironmentFile=/etc/cyberspace/api.env
+ExecStart=/opt/cyberspace/bin/cyberspace-api
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/cyberspace/storage
+
+[Install]
+WantedBy=multi-user.target

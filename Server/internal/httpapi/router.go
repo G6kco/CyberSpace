@@ -9,11 +9,11 @@ import (
 // NewRouter builds the HTTP transport with dependencies supplied explicitly.
 func NewRouter(application *app.App) *gin.Engine {
 	router := gin.New()
-	// The API is served directly, not behind a proxy, so the client IP
-	// recorded in audit logs comes from the connection and cannot be
-	// spoofed with X-Forwarded-For. Configure trusted proxies here if one
-	// is ever placed in front.
-	_ = router.SetTrustedProxies(nil)
+	// In production nginx on the same host proxies every request, so the
+	// forwarding headers are trusted only from loopback. nginx overwrites
+	// them, so a client cannot spoof the IP recorded in audit logs. A
+	// request from anywhere else keeps its connection address.
+	_ = router.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	router.Use(gin.Recovery())
 	router.Use(middleware.InitCORS(application.Config.AllowedOrigins))
 
