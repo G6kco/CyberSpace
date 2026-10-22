@@ -358,6 +358,8 @@ The plain-text answer is **never stored**. Only its HMAC is stored, so a databas
 | 9 | `POST /admin/attempts/:id/lab/restart` | `restartLab` → `Service.RestartLab` | see below |
 | 10 | `GET /admin/question-bank` | `questionBank` → `Service.QuestionBank` | 1 R + 2 R per assessment + `os.Stat` pcap |
 | 11 | `GET /admin/students?search=` | `students` → `Service.StudentRecords` | 2 R |
+| 12 | `POST /admin/students/import` (multipart `file`, .xlsx) | `userHandler.importStudents` → `users.Service.ImportStudents` → `UserRepository.ImportStudents` | one transaction: 2 locking R per 500 rows, batched W, audit |
+| 13 | `GET /admin/admins`, `POST /admin/admins {name, email}` | `userHandler.admins` / `createAdmin` → `users.Service` | 1 R / 1 W + audit |
 
 **Bulk actions use `Service.each()`** (`service.go:519`). For every student ID (duplicates are skipped):
 

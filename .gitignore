@@ -41,5 +41,7 @@ cover.out
 Server/storage/pcaps/*
 !Server/storage/pcaps/README.md
 Server/storage/files/
+# Uploaded or reference student lists: real names, emails and register numbers
+Server/storage/Student_name_list/
 Reference/
 .omc/

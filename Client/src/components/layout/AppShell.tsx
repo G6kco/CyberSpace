@@ -12,6 +12,7 @@ const pageTitles: Record<string, string> = {
   '/admin/monitoring': 'Assessment Monitoring',
   '/admin/assessments': 'Question Bank',
   '/admin/students': 'Students',
+  '/admin/administrators': 'Administrators',
 }
 
 export function AppShell() {

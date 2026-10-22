@@ -6,6 +6,7 @@ import { attemptOutcome } from '../../lib/assessment'
 import { formatDateTime } from '../../lib/format'
 import { errorMessage } from '../../services/api'
 import { adminApi } from '../../services/assessments'
+import { StudentImport } from '../../features/users/StudentImport'
 import type { StudentRecord } from '../../types/assessment'
 
 export function StudentsPage() {
@@ -33,6 +34,7 @@ export function StudentsPage() {
         <h2 className="page-heading">Students</h2>
         <p className="mt-2 max-w-2xl text-secondary">Level progress, latest attempt, and retake cooldown for every student account.</p>
       </div>
+      <StudentImport onImported={() => setReload((n) => n + 1)} />
       <section className="surface">
         <div className="border-b border-border p-4 sm:p-5">
           <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, email, or register number" maxLength={100} />
@@ -43,7 +45,7 @@ export function StudentsPage() {
           ) : !records ? (
             <LoadingSkeleton rows={5} />
           ) : records.length === 0 ? (
-            <EmptyState title="No students found" description="Student accounts are created by an administrator; none match this search." />
+            <EmptyState title="No students found" description="Import a student list above, or change the search." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-left text-sm">
