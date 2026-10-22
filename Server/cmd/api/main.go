@@ -22,6 +22,7 @@ import (
 	"github.com/G6kco/CyberSpace/internal/labs"
 	"github.com/G6kco/CyberSpace/internal/labs/docker"
 	"github.com/G6kco/CyberSpace/internal/levels"
+	"github.com/G6kco/CyberSpace/internal/users"
 	"github.com/G6kco/CyberSpace/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -135,6 +136,18 @@ func run() error {
 		return fmt.Errorf("initialize level builder: %w", err)
 	}
 	application.Levels = levelService
+
+	// Accounts: students uploaded in bulk, administrators added one by one.
+	userService, err := users.NewService(
+		database.NewUserRepository(db),
+		assessmentRepository,
+		log,
+		users.Config{AllowedDomain: cfg.GoogleAllowedDomain},
+	)
+	if err != nil {
+		return fmt.Errorf("initialize accounts: %w", err)
+	}
+	application.Users = userService
 
 	// Gin's debug mode prints every route and warns on startup; production
 	// runs quiet.

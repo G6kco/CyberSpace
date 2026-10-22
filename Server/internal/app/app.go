@@ -9,6 +9,7 @@ import (
 	"github.com/G6kco/CyberSpace/internal/auth"
 	"github.com/G6kco/CyberSpace/internal/config"
 	"github.com/G6kco/CyberSpace/internal/levels"
+	"github.com/G6kco/CyberSpace/internal/users"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,8 @@ type App struct {
 	Assessments *assessments.Service
 	// Levels is the administrators' level builder, set by main.
 	Levels *levels.Service
+	// Users creates student and administrator accounts, set by main.
+	Users *users.Service
 }
 
 // New creates a dependency container and rejects incomplete startup wiring.

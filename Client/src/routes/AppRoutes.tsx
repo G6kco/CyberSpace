@@ -10,6 +10,7 @@ import { AssessmentWorkspacePage } from '../pages/student/AssessmentWorkspacePag
 import { LobbyPage } from '../pages/student/LobbyPage'
 import { MonitoringPage } from '../pages/admin/MonitoringPage'
 import { StudentsPage } from '../pages/admin/StudentsPage'
+import { AdministratorsPage } from '../pages/admin/AdministratorsPage'
 import { AssessmentManagementPage } from '../pages/admin/AssessmentManagementPage'
 import { LevelsPage } from '../pages/admin/LevelsPage'
 import { LevelEditorPage } from '../pages/admin/LevelEditorPage'
@@ -62,6 +63,7 @@ export function AppRoutes() {
       <Route path="admin/levels" element={<RequireRole role="admin"><LevelsPage /></RequireRole>} />
       <Route path="admin/levels/:levelId" element={<RequireRole role="admin"><LevelEditorPage /></RequireRole>} />
       <Route path="admin/students" element={<RequireRole role="admin"><StudentsPage /></RequireRole>} />
+      <Route path="admin/administrators" element={<RequireRole role="admin"><AdministratorsPage /></RequireRole>} />
     </Route>
     <Route path="*" element={<NotFoundPage />} />
   </Routes>
